@@ -1,4 +1,4 @@
-import { ShaderEffect, shaderEffects } from "./utils";
+import { ShaderEffect, shaderEffects } from './utils';
 
 // Vertex shader used for all passes
 export const multiPassVertexShader = `
@@ -28,9 +28,30 @@ export function createPassthroughShader(): string {
 export function createEffectShader(effect: ShaderEffect): string {
   const effectDef = shaderEffects[effect];
   const hasIntensity = effectDef.intensity !== undefined;
-  
+
   const intensityUniform = hasIntensity ? `uniform float u_intensity_${effect};` : '';
-  
+
+  if (effectDef.stage === 'feedback') {
+    return `
+      precision mediump float;
+      uniform sampler2D u_image;
+      uniform sampler2D u_history;
+      uniform float u_time;
+      uniform float u_bpm;
+      ${intensityUniform}
+      varying vec2 v_texCoord;
+
+      void main() {
+        vec2 uv = v_texCoord;
+        vec4 color = texture2D(u_image, uv);
+
+        ${effectDef.glsl}
+
+        gl_FragColor = color;
+      }
+    `;
+  }
+
   if (effectDef.stage === 'mapping') {
     // Mapping effects modify UV coordinates
     return `

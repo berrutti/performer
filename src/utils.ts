@@ -1,41 +1,44 @@
 // utils.ts
 export enum ShaderEffect {
-  INVERT = "INVERT",
-  GRAYSCALE = "GRAYSCALE",
-  REALITY_GLITCH = "REALITY_GLITCH",
-  KALEIDOSCOPE = "KALEIDOSCOPE",
-  DISPLACE = "DISPLACE",
-  SWIRL = "SWIRL",
-  CHROMA = "CHROMA",
-  PIXELATE = "PIXELATE",
-  VORONOI = "VORONOI",
-  RIPPLE = "RIPPLE",
+  INVERT = 'INVERT',
+  GRAYSCALE = 'GRAYSCALE',
+  REALITY_GLITCH = 'REALITY_GLITCH',
+  KALEIDOSCOPE = 'KALEIDOSCOPE',
+  DISPLACE = 'DISPLACE',
+  SWIRL = 'SWIRL',
+  CHROMA = 'CHROMA',
+  PIXELATE = 'PIXELATE',
+  VORONOI = 'VORONOI',
+  RIPPLE = 'RIPPLE',
+  FEEDBACK_ECHO = 'FEEDBACK_ECHO',
+  PALETTE_CYCLING = 'PALETTE_CYCLING',
+  CONTOUR = 'CONTOUR'
 }
 
 export interface ShaderEffectDef {
-  /** 'mapping' effects mutate uv, 'color' effects mutate color */
-  stage: "mapping" | "color";
+  /** 'mapping' effects mutate uv, 'color' effects mutate color, 'feedback' effects read u_history */
+  stage: 'mapping' | 'color' | 'feedback';
   glsl: string;
   intensity?: number; // Optional - if present, effect has intensity control
 }
 
 export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.INVERT]: {
-    stage: "color",
+    stage: 'color',
     intensity: 1.0,
-    glsl: `color.rgb = mix(color.rgb, 1.0 - color.rgb, u_intensity_INVERT);`,
+    glsl: `color.rgb = mix(color.rgb, 1.0 - color.rgb, u_intensity_INVERT);`
   },
 
   [ShaderEffect.GRAYSCALE]: {
-    stage: "color",
+    stage: 'color',
     glsl: `
       float l = dot(color.rgb, vec3(0.299,0.587,0.114));
       color = vec4(vec3(l),1.0);
-    `,
+    `
   },
 
   [ShaderEffect.REALITY_GLITCH]: {
-    stage: "mapping",
+    stage: 'mapping',
     intensity: 1.0,
     glsl: `
       {
@@ -105,7 +108,18 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
           sin(chroma_phase) * intensity * 0.03,
           cos(chroma_phase * 1.3) * intensity * 0.03
         );
-        
+
+        // Layer 8: Scanline banding — horizontal strips shifted independently
+        // Time is quantized so strips snap rather than drift, giving a digital-corruption feel
+        float strip_count = floor(20.0 + intensity * 60.0);
+        float strip_id = floor(chaos_uv.y * strip_count);
+        float t_snap = floor(time * 10.0);
+        float band_hash = fract(sin(dot(vec2(strip_id, t_snap),       vec2(127.1, 311.7))) * 43758.5453);
+        float band_amt  = fract(sin(dot(vec2(strip_id, t_snap + 5.1), vec2(269.5, 183.3))) * 43758.5453);
+        // At low intensity few strips fire; at high intensity most do
+        float band_active = step(mix(0.92, 0.45, intensity), band_hash);
+        total_distortion.x += (band_amt - 0.5) * intensity * 0.5 * band_active;
+
         // Final UV with all distortions applied
         vec2 final_distorted_uv = chaos_uv + total_distortion + chroma_distort;
         
@@ -118,11 +132,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         float chaos_factor = smoothstep(0.7, 0.9, intensity);
         uv = mix(wrapped_uv, unwrapped_uv, chaos_factor);
       }
-    `,
+    `
   },
 
   [ShaderEffect.KALEIDOSCOPE]: {
-    stage: "mapping",
+    stage: 'mapping',
     glsl: `
       {
         // Center the coordinates and add time-based rotation
@@ -159,11 +173,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         // Keep UV in bounds with wrapping for seamless effect
         uv = fract(uv);
       }
-    `,
+    `
   },
 
   [ShaderEffect.DISPLACE]: {
-    stage: "mapping",
+    stage: 'mapping',
     intensity: 1.0,
     glsl: `
       {
@@ -177,11 +191,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         
         uv = mix(uv, displaced_uv, u_intensity_DISPLACE);
       }
-    `,
+    `
   },
 
   [ShaderEffect.SWIRL]: {
-    stage: "mapping",
+    stage: 'mapping',
     glsl: `
       {
         // Convert time to beats and make the cycle last exactly 8 beats
@@ -192,11 +206,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         float a = atan(c.y,c.x) + r*3.0*sin(beatTime * 0.78539816339); // 0.78539816339 = PI/4
         uv = (vec2(cos(a),sin(a)) * r + 1.0) * 0.5;
       }
-    `,
+    `
   },
 
   [ShaderEffect.CHROMA]: {
-    stage: "color",
+    stage: 'color',
     intensity: 1.0,
     glsl: `
       {
@@ -208,11 +222,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         );
         color.rgb += chromaDiff * u_intensity_CHROMA;
       }
-    `,
+    `
   },
 
   [ShaderEffect.PIXELATE]: {
-    stage: "mapping",
+    stage: 'mapping',
     intensity: 1.0,
     glsl: `
       {
@@ -221,11 +235,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         vec2 pixelated_uv = floor(uv * px) / px;
         uv = mix(uv, pixelated_uv, u_intensity_PIXELATE);
       }
-    `,
+    `
   },
 
   [ShaderEffect.VORONOI]: {
-    stage: "mapping",
+    stage: 'mapping',
     intensity: 1.0,
     glsl: `
       {
@@ -240,11 +254,11 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         
         uv = mix(uv, voronoi_uv, u_intensity_VORONOI);
       }
-    `,
+    `
   },
 
   [ShaderEffect.RIPPLE]: {
-    stage: "color",
+    stage: 'color',
     intensity: 1.0,
     glsl: `
       {
@@ -252,8 +266,59 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
         float wave = sin((d - u_time*0.5)*30.0);
         color.rgb += wave * 0.2 * u_intensity_RIPPLE;
       }
-    `,
+    `
   },
+
+  [ShaderEffect.FEEDBACK_ECHO]: {
+    stage: 'feedback',
+    intensity: 1.0,
+    glsl: `
+      {
+        vec2 c = uv - 0.5;
+        float beatTime = (u_time * u_bpm) / 60.0;
+        float rot = beatTime * 0.019635;
+        float cosR = cos(rot);
+        float sinR = sin(rot);
+        c = vec2(c.x * cosR - c.y * sinR, c.x * sinR + c.y * cosR);
+        c *= 1.0 + 0.005 * u_intensity_FEEDBACK_ECHO;
+        vec4 history = texture2D(u_history, clamp(c + 0.5, 0.0, 1.0));
+        color = mix(color, history, mix(0.5, 0.95, u_intensity_FEEDBACK_ECHO));
+      }
+    `
+  },
+
+  [ShaderEffect.PALETTE_CYCLING]: {
+    stage: 'color',
+    intensity: 1.0,
+    glsl: `
+      {
+        float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        float t = luma + u_time * 0.2;
+        vec3 pal = vec3(0.5) + vec3(0.5) * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * t + vec3(0.0, 0.33, 0.67)));
+        color.rgb = mix(color.rgb, pal, u_intensity_PALETTE_CYCLING);
+      }
+    `
+  },
+
+  [ShaderEffect.CONTOUR]: {
+    stage: 'color',
+    intensity: 1.0,
+    glsl: `
+      {
+        float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        float freq = mix(8.0, 40.0, u_intensity_CONTOUR);
+        float bands = sin(luma * freq * 3.14159);
+        float line = 1.0 - smoothstep(0.0, 0.15, abs(bands));
+        float hue = luma * 4.0 + u_time * 0.3;
+        vec3 lineColor = vec3(
+          0.5 + 0.5 * cos(hue),
+          0.5 + 0.5 * cos(hue + 2.094),
+          0.5 + 0.5 * cos(hue + 4.189)
+        );
+        color.rgb = mix(color.rgb, lineColor, line);
+      }
+    `
+  }
 };
 
 export function getTextureCoordinates(
@@ -281,7 +346,7 @@ export function getTextureCoordinates(
       1,
       vCrop, // bottom-right
       1,
-      1 - vCrop, // top-right
+      1 - vCrop // top-right
     ]);
   } else {
     // Video is wider than (or equal to) canvas: crop horizontally.
@@ -300,7 +365,7 @@ export function getTextureCoordinates(
       1 - uCrop,
       0, // bottom-right
       1 - uCrop,
-      1, // top-right
+      1 // top-right
     ]);
   }
 }

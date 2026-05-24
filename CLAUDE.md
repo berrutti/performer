@@ -1,229 +1,195 @@
-# Play WebGL - Architecture & Context for Claude
+# performer - Architecture & Context for Claude
 
 ## Project Overview
-Real-time WebGL video effects application with MIDI controller integration. Users can apply shader effects to webcam or video files, control effects via MIDI (Launchkey Mini MK3), and synchronize effects with BPM.
+
+Real-time WebGL video effects application with MIDI controller integration. Used in live music performance. Users apply shader effects to webcam or video files, control effects via MIDI (Launchkey Mini MK3), and synchronize effects with BPM.
 
 ## Tech Stack
-- **Framework**: React 19 + TypeScript
-- **Build Tool**: Vite
-- **Package Manager**: Yarn (NOT npm - no package-lock.json)
-- **Testing**: Vitest + @testing-library/react
+
+- **Framework**: Vue 3 + TypeScript (Composition API)
+- **Build Tool**: Vite 8
+- **Package Manager**: Yarn (NOT npm)
+- **Testing**: Vitest 4 + @vue/test-utils
 - **Styling**: Plain CSS
 - **APIs**: WebGL, WebMIDI, MediaStream
+- **License**: GPL-3.0-or-later
 
 ## Architecture
 
-### Hooks-Based Architecture
-App.tsx (~380 lines) coordinates 6 custom hooks that separate concerns:
+### Composables-Based Architecture
+
+App.vue coordinates 8 composables that separate concerns:
 
 1. **useBpmTap** - BPM tap tempo calculation from spacebar
 2. **useSettings** - Settings persistence to localStorage (showHelp, isMuted, inputSource, bpm)
 3. **useEffectTransitions** - **CRITICAL**: Single source of truth for `activeEffects` state + smooth effect transitions
 4. **useVideoPlaylist** - Video playlist management, playback controls
 5. **useVideoSource** - Video element source management (webcam vs file)
-6. **usePopupWindow** - Popup window for control panel
-
-Plus two more complex hooks:
-- **useMidi** - MIDI controller integration (Launchkey Mini MK3)
-- **useWebGLRenderer** - WebGL rendering pipeline
+6. **useMidi** - MIDI controller integration (Launchkey Mini MK3)
+7. **useWebGLRenderer** - WebGL rendering pipeline (sets up once on mount, reads from reactive refs)
+8. **usePopupWindow** - Popup window via createApp() in a second window
 
 ### Key State Management Rules
 
 ⚠️ **CRITICAL - State Synchronization**:
+
 - `activeEffects` lives ONLY in `useEffectTransitions` - it's the single source of truth
 - Never create duplicate `activeEffects` state elsewhere
-- Never try to sync `activeEffects` between hooks with useEffect - causes circular dependencies
+- All state is `Ref<T>` - composables return refs directly, consumers read/write `.value`
 
 ❌ **NEVER DO THIS**:
+
 ```typescript
-// BAD - causes infinite loops and UI freezing
-useEffect(() => {
-  effectTransitions.setActiveEffects(settings.activeEffects);
-}, [settings.activeEffects]);
+// BAD - causes circular reactivity
+watch(settings.activeEffects, (val) => {
+  effectTransitions.activeEffects.value = val;
+});
 ```
 
 ### Shader Effects System
 
 **Effects Enum** (src/utils.ts):
+
 ```typescript
 enum ShaderEffect {
-  INVERT, GRAYSCALE, REALITY_GLITCH, KALEIDOSCOPE,
-  DISPLACE, SWIRL, CHROMA, PIXELATE, VORONOI, RIPPLE
+  INVERT,
+  GRAYSCALE,
+  REALITY_GLITCH,
+  KALEIDOSCOPE,
+  DISPLACE,
+  SWIRL,
+  CHROMA,
+  PIXELATE,
+  VORONOI,
+  RIPPLE,
+  FEEDBACK_ECHO,
+  PALETTE_CYCLING,
+  CONTOUR
 }
 ```
 
 **Effect Stages**:
+
 - `mapping` stage: Mutates UV coordinates (distortion effects)
 - `color` stage: Mutates color values (color effects)
+- `feedback` stage: Reads `u_history` texture (previous frame) — used by FEEDBACK_ECHO
 
-**Intensity Control**: Some effects have `intensity` property (0-1 range) for user control
+**Intensity Control**: Some effects have `intensity` property (0-1 range)
 
-**Transitions**: Effects smoothly fade in/out using transition system in `src/transitions.ts`
+**Transitions**: Effects smoothly fade in/out using `src/transitions.ts`
 
 ### Project Structure
 
 ```
 src/
-├── App.tsx                    # Main app component (~380 lines)
-├── ControlPanel.tsx           # UI controls component
-├── hooks/                     # Custom hooks
-│   ├── useBpmTap.ts          # BPM calculation
-│   ├── useSettings.ts        # localStorage persistence
-│   ├── useEffectTransitions.ts  # Effect state + transitions (SINGLE SOURCE OF TRUTH)
-│   ├── useVideoPlaylist.ts  # Video management
-│   ├── useVideoSource.ts     # Video element management
-│   ├── usePopupWindow.ts     # Popup window
-│   ├── useMidi.ts            # MIDI integration
-│   ├── useWebGLRenderer.ts   # WebGL rendering
-│   └── *.test.ts             # Vitest tests (42 tests total)
+├── App.vue                          # Main app component
+├── components/
+│   ├── ControlPanel.vue             # Tab container (Input / Effects)
+│   ├── EffectsTab.vue               # Effect toggles + intensity sliders
+│   ├── InputTab.vue                 # Source select, playlist, timeline
+│   └── index.ts                     # Component exports
+├── composables/                     # Vue composables (= React hooks)
+│   ├── useBpmTap.ts
+│   ├── useSettings.ts
+│   ├── useEffectTransitions.ts      # SINGLE SOURCE OF TRUTH for activeEffects
+│   ├── useVideoPlaylist.ts
+│   ├── useVideoSource.ts
+│   ├── useMidi.ts
+│   ├── useWebGLRenderer.ts
+│   ├── usePopupWindow.ts
+│   └── *.test.ts                    # Vitest tests (41 tests total)
 ├── services/
-│   └── settingsService.ts    # localStorage abstraction
-├── transitions.ts            # Effect transition system
-├── utils.ts                  # ShaderEffect enum + definitions
+│   └── settingsService.ts           # localStorage (keys: performer-*)
+├── transitions.ts                   # Effect transition system
+├── shaderBuilder.ts                 # GLSL shader source builders
+├── utils.ts                         # ShaderEffect enum + definitions
+├── main.ts                          # createApp(App).mount('#app')
+├── index.css
 └── test/
-    └── setup.ts              # Vitest setup
+    ├── setup.ts
+    └── utils.ts                     # withSetup() helper for composable tests
 ```
 
 ### Testing
 
-**Test Coverage** (42 tests):
-- ✅ useBpmTap (6 tests)
-- ✅ useSettings (9 tests)
-- ✅ useEffectTransitions (10 tests)
-- ✅ useVideoPlaylist (17 tests)
-- ❌ useMidi (not tested - complex WebMIDI mocking)
-- ❌ useWebGLRenderer (not tested - WebGL mocking)
-- ❌ usePopupWindow (not tested - window.open mocking)
-- ❌ useVideoSource (not tested - returns void, mostly side effects)
+**Test Coverage** (41 tests):
+
+- useBpmTap.test.ts - BPM calculation, spacebar events
+- useSettings.test.ts - load/save lifecycle
+- useEffectTransitions.test.ts - toggle, debounce, intensity
+- useVideoPlaylist.test.ts - playlist management, playback
+
+**withSetup() pattern** for composable tests:
+
+```typescript
+const [result, cleanup] = withSetup(() => useMyComposable());
+result.someRef.value; // access
+result.someRef.value = newVal; // mutate
+await nextTick(); // wait for watchers
+cleanup(); // unmount
+```
 
 **Run tests**: `yarn test`
 
 ### Settings Persistence
 
 **settingsService** (src/services/settingsService.ts):
-- Saves/loads to localStorage with key prefix 'play-webgl-'
-- Settings: showHelp, isMuted, inputSource, bpm, activeEffects, effectIntensities
 
-**Initialization Pattern**:
-- Hooks use `isInitialized` flag to prevent saving on first mount
-- First useEffect sets isInitialized = true
-- Subsequent renders save to localStorage
+- Saves/loads to localStorage with key prefix `performer-`
+- Settings: showHelp, isMuted, inputSource, bpm, activeEffects
+
+### useWebGLRenderer — Key Architecture Note
+
+In the Vue version, WebGL shaders are compiled **once on mount** for all effects. The render loop reads from reactive refs (`options.activeEffects.value`, `options.bpm.value`, etc.) directly on every frame — no rebuild needed when effects change. This is more efficient than the old React version.
 
 ## Development Workflow Rules
 
-### 🚨 CRITICAL RULES - MUST FOLLOW:
+### CRITICAL RULES:
 
 1. **NEVER modify logic without explicit permission**
-   - Only refactor code structure with user approval
-   - Always ask before changing behavior
-
-2. **ALWAYS verify no regressions**
-   - Run tests: `yarn test`
-   - Ask user to test the app if no tests exist
-   - Never mark tasks complete without verification
-
-3. **DO NOT be "smart" about architecture**
-   - Don't proactively refactor unless asked
-   - Don't make assumptions about improvements
-   - Every part is delicate and working - treat with care
+2. **ALWAYS run tests before marking complete**: `yarn test --run`
+3. **DO NOT be "smart" about architecture** — every part is deliberate
 
 ### Code Style
 
-- Use TypeScript strict mode
-- Prefer explicit types over inference where it aids clarity
-- Use React.Dispatch<React.SetStateAction<T>> for setter returns
-- Use RefObject<HTMLElement | null> for refs that can be null
-- No emojis in code unless explicitly requested
+- Vue 3 Composition API only (`<script setup>`)
+- Props via `defineProps`, emits via `defineEmits`
+- Composables return reactive refs directly (no separate setters)
+- TypeScript strict mode, no `any`
+- No emojis in code (only in UI strings already present)
 
 ### Git Workflow
 
-⚠️ **CRITICAL - Git Commands**:
-- **NEVER run git commands unless explicitly asked by the user**
-- **NEVER push, commit, or change the git HEAD**
-- User may ask: "what changed between commits?" - you can read git history for analysis only
-- User may ask: "create a commit" - only then you can commit (never push)
-- **DO NOT** proactively create commits, even when completing tasks
-- User uses yarn (not npm)
-- Commit messages: Follow existing repo style, use heredoc for multi-line
-- No force pushes to main/master
+⚠️ **CRITICAL**: Never run git state-modifying commands unless explicitly asked.
 
 ## MIDI Integration
 
-**Supported Controller**: Novation Launchkey Mini MK3
+**Controller**: Novation Launchkey Mini MK3
 
-**MIDI Mapping**:
-- Pads (top row): Toggle effects on/off
-- Knobs (rotary controls): Adjust effect intensities
-- Transport controls: Playback, navigation
-- Scene buttons: Video playlist management
+**Mapping**:
 
-**Implementation**: `useMidi.ts` handles WebMIDI API integration
+- Top row pads (40-43, 48-51): toggle effects + knob control
+- Bottom row pads (36-39, 44-47): toggle only
+- Knobs 1-8 (CC 21-28): intensity for top-row effects
 
-## Common Tasks
+## GitHub Actions
 
-### Adding a New Effect
-
-1. Add to `ShaderEffect` enum in `src/utils.ts`
-2. Define in `shaderEffects` object with stage + GLSL code
-3. Update `initialActiveEffects` in hooks that use it
-4. Update tests to include new effect
-5. **Get user approval before implementing**
-
-### Adding a New Hook
-
-1. Create in `src/hooks/`
-2. Export return type interface
-3. Write tests in `src/hooks/*.test.ts`
-4. Import and use in `App.tsx`
-5. **Get user approval for logic changes**
-
-### Modifying Effect Transitions
-
-- Code in `src/transitions.ts`
-- Uses requestAnimationFrame for smooth 60fps animations
-- Default transition duration: 300ms
-- Debounce delay: 50ms (prevents rapid toggles)
-
-## Known Issues & Quirks
-
-1. **Vitest act() warnings**: Async transitions trigger act() warnings in tests - this is expected and harmless
-2. **Effect sync bug**: Fixed - activeEffects used to exist in two places, now only in useEffectTransitions
-3. **Popup window styling**: Copies all stylesheets to popup but may fail for cross-origin sheets (try/catch)
-
-## Performance Notes
-
-- WebGL rendering: 60fps target
-- Effect transitions: Hardware-accelerated when possible
-- Video processing: Real-time, no buffering
-- State updates: Debounced where appropriate (50ms for effects)
+- `ci.yml` — on PR to main: lint:ci, format:check, typecheck, test
+- `auto-release.yml` — on merged PR with release:patch/minor/major label
+- `build-and-release.yml` — on release tag: build + deploy to GitHub Pages
 
 ## Deployment
 
-- Build: `yarn build`
-- Preview: `yarn preview`
-- Deploy: `yarn deploy` (builds + deploys to GitHub Pages via gh-pages)
-- Version bump: Automatic with deploy script
+- Build: `yarn dist`
+- Deploy: GitHub Actions on tag push → GitHub Pages at https://berrutti.github.io/performer
 
-## Future Improvements (If Asked)
+## Future Effects (Not Yet Built)
 
-- [ ] Add tests for useMidi (requires WebMIDI mocking)
-- [ ] Add tests for useWebGLRenderer (requires WebGL context mocking)
-- [ ] Add more shader effects
-- [ ] Add effect presets/combinations
-- [ ] Add audio reactivity (frequency analysis)
+1. BLOOM — multi-pass: threshold → blur → composite
+2. REACTION_DIFFUSION — Gray-Scott sim seeded by luminance
+3. PIXEL_SORT — sort pixels by brightness, glitch aesthetic
 
-## Context for Next Session
-
-When you return to this project:
-1. Read this file first to understand architecture
-2. Check if tests pass: `yarn test`
-3. Review recent git history if needed
-4. Always ask before modifying logic
-5. Remember: activeEffects only lives in useEffectTransitions
-6. Clip functionality has been removed - effects are manually toggled only
-
-## Contact & Links
+## Contact
 
 - Author: berrutti (berrutit@gmail.com)
 - GitHub: https://github.com/berrutti
-- Homepage: https://berrutti.github.io/play-webgl

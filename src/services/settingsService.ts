@@ -1,11 +1,11 @@
-import { ShaderEffect } from "../utils";
+import { ShaderEffect } from '../utils';
 
 const STORAGE_KEYS = {
-  SHOW_HELP: 'play-webgl-showHelp',
-  MUTED: 'play-webgl-muted',
-  INPUT_SOURCE: 'play-webgl-inputSource',
-  ACTIVE_EFFECTS: 'play-webgl-activeEffects',
-  BPM: 'play-webgl-bpm',
+  SHOW_HELP: 'performer-showHelp',
+  MUTED: 'performer-muted',
+  INPUT_SOURCE: 'performer-inputSource',
+  ACTIVE_EFFECTS: 'performer-activeEffects',
+  BPM: 'performer-bpm'
 } as const;
 
 export interface AppSettings {
@@ -92,11 +92,11 @@ export const settingsService = {
   // Clear all settings
   clearAllSettings(): void {
     try {
-      Object.values(STORAGE_KEYS).forEach(key => {
+      Object.values(STORAGE_KEYS).forEach((key) => {
         localStorage.removeItem(key);
       });
     } catch (error) {
       console.warn('Failed to clear settings:', error);
     }
   }
-}; 
+};

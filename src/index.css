@@ -1,21 +1,48 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+*:focus,
+*:focus-visible {
+  outline: none;
+}
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-2: #1e1e1e;
+  --color-border: #2a2a2a;
+  --color-border-2: #3a3a3a;
+  --color-text: #e8e8e8;
+  --color-muted: #666;
+  --color-accent: #0080ff;
+  --color-accent-hover: #0066cc;
+  --color-green: #22c55e;
+  --color-red: #ef4444;
+  --color-midi: rgba(0, 128, 255, 0.15);
+  --color-midi-border: rgba(0, 128, 255, 0.4);
+  --radius: 6px;
+  --font: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
 
-  color-scheme: light dark;
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font);
+  font-size: 13px;
+  user-select: none;
+  -webkit-user-select: none;
+  height: 100%;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+#app {
+  height: 100vh;
 }
