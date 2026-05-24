@@ -13,6 +13,3 @@ Currently that's the only device supported (because that's the one I own). PRs w
 
 - Right-click: open controls tab
 - Spacebar: tap BPM
-- MIDI knobs 1-8: intensity for the first 8 effects
-- MIDI top row pads: toggle effect + knob control
-- MIDI bottom row pads: toggle only
