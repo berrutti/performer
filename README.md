@@ -1,9 +1,18 @@
-# play-webgl
+# performer
 
-A WebGL webapp to process live video or VODs with real-time shader effects:
+Perform with live video or VODs and apply shaders to them.
 
-https://berrutti.github.io/play-webgl/
+https://berrutti.github.io/performer/
 
-Press right click to show a context menu with effects.
+Right-click the canvas to open the controls in a separate tab. Use a webcam or load your own video files.
 
-Play.
+It supports connecting a Launchkey Mini MK3 to control effects and intensity via MIDI.
+Currently that's the only device supported (because that's the one I own). PRs with other devices welcome.
+
+## Controls
+
+- Right-click: open controls tab
+- Spacebar: tap BPM
+- MIDI knobs 1-8: intensity for the first 8 effects
+- MIDI top row pads: toggle effect + knob control
+- MIDI bottom row pads: toggle only
