@@ -1,48 +1,52 @@
 {
-  "name": "play-webgl",
+  "name": "performer",
   "private": true,
   "version": "1.0.6",
   "type": "module",
+  "license": "GPL-3.0-or-later",
   "author": {
     "name": "berrutti",
     "email": "berrutit@gmail.com",
     "url": "https://github.com/berrutti"
   },
-  "homepage": "https://berrutti.github.io/play-webgl",
+  "homepage": "https://berrutti.github.io/performer",
   "scripts": {
-    "build": "tsc -b && vite build",
-    "deploy": "npm version patch && npm run build && gh-pages -d dist",
     "dev": "vite",
+    "dist": "vue-tsc -b && vite build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
-    "preview": "vite preview",
+    "lint:ci": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
     "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "vue": "^3.5.34",
     "webmidi": "^3.1.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.0",
     "@types/node": "^22.10.5",
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
-    "@vitejs/plugin-react": "^4.3.4",
-    "@vitest/ui": "^3.2.4",
-    "eslint": "^9.21.0",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "eslint-plugin-react-refresh": "^0.4.19",
-    "gh-pages": "^6.3.0",
-    "globals": "^15.15.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/ui": "^4.1.7",
+    "@vue/test-utils": "^2.4.6",
+    "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.1",
+    "globals": "^17.6.0",
     "jsdom": "^27.0.0",
-    "typescript": "~5.7.2",
-    "typescript-eslint": "^8.24.1",
-    "vite": "^6.2.0",
-    "vitest": "^3.2.4"
+    "prettier": "^3.8.3",
+    "simple-git-hooks": "^2.13.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.4",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7",
+    "vue-eslint-parser": "^10.4.0",
+    "vue-tsc": "^2.2.10"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "yarn lint:ci && yarn format:check"
   }
 }

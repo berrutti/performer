@@ -6,12 +6,12 @@ export type TransitionState = 'idle' | 'transitioning-in' | 'transitioning-out';
 
 export interface EffectTransition {
   state: TransitionState;
-  currentIntensity: number;    // What we actually render with (0-1)
-  targetIntensity: number;     // What user set (0-1)
-  startIntensity: number;      // Intensity when transition started
-  progress: number;            // 0-1 animation progress
-  startTime: number;           // When transition started
-  isActive: boolean;           // True if effect should be rendered (currentIntensity > 0)
+  currentIntensity: number; // What we actually render with (0-1)
+  targetIntensity: number; // What user set (0-1)
+  startIntensity: number; // Intensity when transition started
+  progress: number; // 0-1 animation progress
+  startTime: number; // When transition started
+  isActive: boolean; // True if effect should be rendered (currentIntensity > 0)
 }
 
 export type EffectTransitions = Record<ShaderEffect, EffectTransition>;
@@ -25,7 +25,7 @@ export function easeInOutCubic(t: number): number {
 export function createInitialTransitions(): EffectTransitions {
   const transitions: Partial<EffectTransitions> = {};
 
-  Object.values(ShaderEffect).forEach(effect => {
+  Object.values(ShaderEffect).forEach((effect) => {
     transitions[effect] = {
       state: 'idle',
       currentIntensity: 0,
@@ -33,7 +33,7 @@ export function createInitialTransitions(): EffectTransitions {
       startIntensity: 0,
       progress: 0,
       startTime: 0,
-      isActive: false,
+      isActive: false
     };
   });
 
@@ -62,7 +62,7 @@ export function startTransition(
       startIntensity: current.currentIntensity, // Remember where we started
       startTime: now,
       progress: 0,
-      isActive: true, // Keep active during transition
+      isActive: true // Keep active during transition
     };
   } else {
     // Immediate toggle for non-intensity effects (like GRAYSCALE, KALEIDOSCOPE)
@@ -74,7 +74,7 @@ export function startTransition(
       startIntensity: targetIntensity,
       progress: 1,
       startTime: now,
-      isActive: targetIntensity > 0,
+      isActive: targetIntensity > 0
     };
   }
 
@@ -82,10 +82,7 @@ export function startTransition(
 }
 
 // Update all transitions based on current time
-export function updateTransitions(
-  transitions: EffectTransitions,
-  now: number
-): EffectTransitions {
+export function updateTransitions(transitions: EffectTransitions, now: number): EffectTransitions {
   const newTransitions = { ...transitions };
   let hasChanges = false;
 
@@ -102,16 +99,21 @@ export function updateTransitions(
 
     if (transition.state === 'transitioning-in') {
       // Fade in: interpolate from startIntensity to targetIntensity
-      newIntensity = transition.startIntensity + (easedProgress * (transition.targetIntensity - transition.startIntensity));
-    } else { // transitioning-out
+      newIntensity =
+        transition.startIntensity +
+        easedProgress * (transition.targetIntensity - transition.startIntensity);
+    } else {
+      // transitioning-out
       // Fade out: interpolate from startIntensity to targetIntensity (which is 0)
-      newIntensity = transition.startIntensity + (easedProgress * (transition.targetIntensity - transition.startIntensity));
+      newIntensity =
+        transition.startIntensity +
+        easedProgress * (transition.targetIntensity - transition.startIntensity);
     }
 
     newTransitions[effect] = {
       ...transition,
       currentIntensity: newIntensity,
-      progress: rawProgress,
+      progress: rawProgress
     };
 
     // Complete transition
@@ -120,7 +122,7 @@ export function updateTransitions(
         ...newTransitions[effect],
         state: 'idle',
         currentIntensity: transition.targetIntensity,
-        isActive: transition.targetIntensity > 0,
+        isActive: transition.targetIntensity > 0
       };
     }
 
@@ -130,9 +132,7 @@ export function updateTransitions(
   return hasChanges ? newTransitions : transitions;
 }
 
-
-
 // Check if any transitions are active (for animation loop)
 export function hasActiveTransitions(transitions: EffectTransitions): boolean {
-  return Object.values(transitions).some(t => t.state !== 'idle');
-} 
+  return Object.values(transitions).some((t) => t.state !== 'idle');
+}
