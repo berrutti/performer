@@ -1,4 +1,4 @@
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { ShaderEffect, shaderEffects } from '../../utils';
 import {
   createInitialTransitions,
@@ -7,7 +7,6 @@ import {
   hasActiveTransitions,
   type EffectTransitions
 } from '../../transitions';
-import { settingsService } from '../../services/settingsService';
 
 const DEBOUNCE_DELAY_MS = 50;
 
@@ -15,9 +14,7 @@ export function useEffectTransitions(
   initialActiveEffects: Record<ShaderEffect, boolean>,
   initialIntensities: Record<ShaderEffect, number>
 ) {
-  const activeEffects = ref<Record<ShaderEffect, boolean>>(
-    settingsService.loadSettings().activeEffects ?? initialActiveEffects
-  );
+  const activeEffects = ref<Record<ShaderEffect, boolean>>(initialActiveEffects);
   const effectIntensities = ref<Record<ShaderEffect, number>>({ ...initialIntensities });
   const effectTransitions = ref<EffectTransitions>(createInitialTransitions());
   const lastToggleTime: Record<string, number> = {};
@@ -62,21 +59,6 @@ export function useEffectTransitions(
     }
     animationFrameId = requestAnimationFrame(animate);
   }
-
-  let initialized = false;
-
-  onMounted(() => {
-    initialized = true;
-    settingsService.saveActiveEffects(activeEffects.value);
-  });
-
-  watch(
-    activeEffects,
-    (val) => {
-      if (initialized) settingsService.saveActiveEffects(val);
-    },
-    { deep: true }
-  );
 
   onUnmounted(() => {
     if (animationFrameId) cancelAnimationFrame(animationFrameId);

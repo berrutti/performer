@@ -1,37 +1,53 @@
 import { ref, watch, onMounted } from 'vue';
-import { settingsService } from '../services/settingsService';
+
+const KEYS = {
+  showHelp: 'performer-showHelp',
+  isMuted: 'performer-muted',
+  inputSource: 'performer-inputSource',
+  bpm: 'performer-bpm'
+} as const;
+
+function load<T>(key: string): T | undefined {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw !== null ? (JSON.parse(raw) as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function save(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export function useSettings() {
   const showHelp = ref(true);
   const isMuted = ref(false);
   const inputSource = ref('webcam');
-  const bpm = ref<number>(120);
-  let initialized = false;
+  const bpm = ref(120);
 
   onMounted(() => {
-    const saved = settingsService.loadSettings();
-    if (saved.showHelp !== undefined) showHelp.value = saved.showHelp;
-    if (saved.isMuted !== undefined) isMuted.value = saved.isMuted;
-    if (saved.bpm !== undefined) bpm.value = saved.bpm;
-    if (saved.inputSource !== undefined) inputSource.value = saved.inputSource;
-    initialized = true;
+    const savedShowHelp = load<boolean>(KEYS.showHelp);
+    if (savedShowHelp !== undefined) showHelp.value = savedShowHelp;
+
+    const savedMuted = load<boolean>(KEYS.isMuted);
+    if (savedMuted !== undefined) isMuted.value = savedMuted;
+
+    const savedInputSource = load<string>(KEYS.inputSource);
+    if (savedInputSource !== undefined) inputSource.value = savedInputSource;
+
+    const savedBpm = load<number>(KEYS.bpm);
+    if (savedBpm !== undefined) bpm.value = savedBpm;
   });
 
-  watch(showHelp, (val) => {
-    if (initialized) settingsService.saveShowHelp(val);
-  });
-
-  watch(isMuted, (val) => {
-    if (initialized) settingsService.saveMuted(val);
-  });
-
-  watch(inputSource, (val) => {
-    if (initialized) settingsService.saveInputSource(val);
-  });
-
-  watch(bpm, (val) => {
-    if (initialized) settingsService.saveBpm(val);
-  });
+  watch(showHelp, (val) => save(KEYS.showHelp, val));
+  watch(isMuted, (val) => save(KEYS.isMuted, val));
+  watch(inputSource, (val) => save(KEYS.inputSource, val));
+  watch(bpm, (val) => save(KEYS.bpm, val));
 
   return { showHelp, isMuted, inputSource, bpm };
 }

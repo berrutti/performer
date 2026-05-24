@@ -1,16 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { nextTick } from 'vue';
 import { withSetup } from '../../test/utils';
 import { useEffectTransitions } from './useEffectTransitions';
 import { ShaderEffect } from '../../utils';
-import { settingsService } from '../../services/settingsService';
-
-vi.mock('../../services/settingsService', () => ({
-  settingsService: {
-    loadSettings: vi.fn(),
-    saveActiveEffects: vi.fn()
-  }
-}));
 
 describe('useEffectTransitions', () => {
   const initialActiveEffects: Record<ShaderEffect, boolean> = {
@@ -45,15 +37,7 @@ describe('useEffectTransitions', () => {
     [ShaderEffect.CONTOUR]: 1
   };
 
-  beforeEach(() => {
-    vi.mocked(settingsService.loadSettings).mockReturnValue({
-      activeEffects: initialActiveEffects
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  afterEach(() => {});
 
   it('should initialize with provided active effects and intensities', () => {
     const [result, cleanup] = withSetup(() =>
@@ -64,14 +48,12 @@ describe('useEffectTransitions', () => {
     cleanup();
   });
 
-  it('should load active effects from settings service', () => {
-    const savedActiveEffects = { ...initialActiveEffects, [ShaderEffect.INVERT]: true };
-    vi.mocked(settingsService.loadSettings).mockReturnValue({ activeEffects: savedActiveEffects });
-
-    const [result, cleanup] = withSetup(() =>
-      useEffectTransitions(initialActiveEffects, initialIntensities)
-    );
-    expect(result.activeEffects.value[ShaderEffect.INVERT]).toBe(true);
+  it('should always start with all effects off regardless of any external state', () => {
+    const allOff = { ...initialActiveEffects };
+    const [result, cleanup] = withSetup(() => useEffectTransitions(allOff, initialIntensities));
+    Object.values(ShaderEffect).forEach((effect) => {
+      expect(result.activeEffects.value[effect]).toBe(false);
+    });
     cleanup();
   });
 
@@ -89,11 +71,9 @@ describe('useEffectTransitions', () => {
   });
 
   it('should toggle effect off', async () => {
-    const savedActiveEffects = { ...initialActiveEffects, [ShaderEffect.INVERT]: true };
-    vi.mocked(settingsService.loadSettings).mockReturnValue({ activeEffects: savedActiveEffects });
-
+    const startWithInvertOn = { ...initialActiveEffects, [ShaderEffect.INVERT]: true };
     const [result, cleanup] = withSetup(() =>
-      useEffectTransitions(savedActiveEffects, initialIntensities)
+      useEffectTransitions(startWithInvertOn, initialIntensities)
     );
     expect(result.activeEffects.value[ShaderEffect.INVERT]).toBe(true);
 
@@ -137,34 +117,6 @@ describe('useEffectTransitions', () => {
     await nextTick();
 
     expect(result.effectIntensities.value[ShaderEffect.PIXELATE]).toBe(0.5);
-    cleanup();
-  });
-
-  it('should save active effects after changes', async () => {
-    const [result, cleanup] = withSetup(() =>
-      useEffectTransitions(initialActiveEffects, initialIntensities)
-    );
-    await nextTick();
-    vi.mocked(settingsService.saveActiveEffects).mockClear();
-
-    result.handleToggleEffect(ShaderEffect.INVERT);
-    await nextTick();
-
-    expect(settingsService.saveActiveEffects).toHaveBeenCalledWith(
-      expect.objectContaining({ [ShaderEffect.INVERT]: true })
-    );
-    cleanup();
-  });
-
-  it('should save to settings after initialization', async () => {
-    vi.mocked(settingsService.saveActiveEffects).mockClear();
-    const [, cleanup] = withSetup(() =>
-      useEffectTransitions(initialActiveEffects, initialIntensities)
-    );
-    await nextTick();
-
-    expect(settingsService.saveActiveEffects).toHaveBeenCalledTimes(1);
-    expect(settingsService.saveActiveEffects).toHaveBeenCalledWith(initialActiveEffects);
     cleanup();
   });
 

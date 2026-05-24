@@ -2,21 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { nextTick } from 'vue';
 import { withSetup } from '../test/utils';
 import { useSettings } from './useSettings';
-import { settingsService } from '../services/settingsService';
-
-vi.mock('../services/settingsService', () => ({
-  settingsService: {
-    loadSettings: vi.fn(),
-    saveShowHelp: vi.fn(),
-    saveMuted: vi.fn(),
-    saveInputSource: vi.fn(),
-    saveBpm: vi.fn()
-  }
-}));
 
 describe('useSettings', () => {
+  let store: Record<string, string> = {};
+
   beforeEach(() => {
-    vi.mocked(settingsService.loadSettings).mockReturnValue({});
+    store = {};
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key) => store[key] ?? null);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      store[key] = value;
+    });
   });
 
   afterEach(() => {
@@ -32,12 +27,10 @@ describe('useSettings', () => {
     cleanup();
   });
 
-  it('should load settings from settingsService on mount', async () => {
-    vi.mocked(settingsService.loadSettings).mockReturnValue({
-      showHelp: false,
-      isMuted: true,
-      bpm: 140
-    });
+  it('should load settings from localStorage on mount', async () => {
+    store['performer-showHelp'] = 'false';
+    store['performer-muted'] = 'true';
+    store['performer-bpm'] = '140';
 
     const [result, cleanup] = withSetup(() => useSettings());
     await nextTick();
@@ -48,67 +41,51 @@ describe('useSettings', () => {
     cleanup();
   });
 
-  it('should save showHelp when changed', async () => {
+  it('should save showHelp to localStorage when changed', async () => {
     const [result, cleanup] = withSetup(() => useSettings());
     await nextTick();
-    vi.mocked(settingsService.saveShowHelp).mockClear();
+    vi.mocked(Storage.prototype.setItem).mockClear();
 
     result.showHelp.value = false;
     await nextTick();
 
-    expect(settingsService.saveShowHelp).toHaveBeenCalledWith(false);
+    expect(Storage.prototype.setItem).toHaveBeenCalledWith('performer-showHelp', 'false');
     cleanup();
   });
 
-  it('should save isMuted when changed', async () => {
+  it('should save isMuted to localStorage when changed', async () => {
     const [result, cleanup] = withSetup(() => useSettings());
     await nextTick();
-    vi.mocked(settingsService.saveMuted).mockClear();
+    vi.mocked(Storage.prototype.setItem).mockClear();
 
     result.isMuted.value = true;
     await nextTick();
 
-    expect(settingsService.saveMuted).toHaveBeenCalledWith(true);
+    expect(Storage.prototype.setItem).toHaveBeenCalledWith('performer-muted', 'true');
     cleanup();
   });
 
-  it('should save inputSource when changed', async () => {
+  it('should save inputSource to localStorage when changed', async () => {
     const [result, cleanup] = withSetup(() => useSettings());
     await nextTick();
-    vi.mocked(settingsService.saveInputSource).mockClear();
+    vi.mocked(Storage.prototype.setItem).mockClear();
 
     result.inputSource.value = 'video';
     await nextTick();
 
-    expect(settingsService.saveInputSource).toHaveBeenCalledWith('video');
+    expect(Storage.prototype.setItem).toHaveBeenCalledWith('performer-inputSource', '"video"');
     cleanup();
   });
 
-  it('should save bpm when changed', async () => {
+  it('should save bpm to localStorage when changed', async () => {
     const [result, cleanup] = withSetup(() => useSettings());
     await nextTick();
-    vi.mocked(settingsService.saveBpm).mockClear();
+    vi.mocked(Storage.prototype.setItem).mockClear();
 
     result.bpm.value = 150;
     await nextTick();
 
-    expect(settingsService.saveBpm).toHaveBeenCalledWith(150);
-    cleanup();
-  });
-
-  it('should save loaded settings after initialization', async () => {
-    vi.mocked(settingsService.loadSettings).mockReturnValue({
-      showHelp: false,
-      isMuted: true
-    });
-    vi.mocked(settingsService.saveShowHelp).mockClear();
-    vi.mocked(settingsService.saveMuted).mockClear();
-
-    const [, cleanup] = withSetup(() => useSettings());
-    await nextTick();
-
-    expect(settingsService.saveShowHelp).toHaveBeenCalledWith(false);
-    expect(settingsService.saveMuted).toHaveBeenCalledWith(true);
+    expect(Storage.prototype.setItem).toHaveBeenCalledWith('performer-bpm', '150');
     cleanup();
   });
 
