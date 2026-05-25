@@ -218,12 +218,14 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
       posBuf: WebGLBuffer | null,
       texBuf: WebGLBuffer | null
     ) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-      gl.enableVertexAttribArray(shader.attribLocations.position);
-      gl.vertexAttribPointer(shader.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, texBuf);
-      gl.enableVertexAttribArray(shader.attribLocations.texCoord);
-      gl.vertexAttribPointer(shader.attribLocations.texCoord, 2, gl.FLOAT, false, 0, 0);
+      // gl is guaranteed non-null here — setupAttributes is only called after the null guard in onMounted
+      const g = gl!;
+      g.bindBuffer(g.ARRAY_BUFFER, posBuf);
+      g.enableVertexAttribArray(shader.attribLocations.position);
+      g.vertexAttribPointer(shader.attribLocations.position, 2, g.FLOAT, false, 0, 0);
+      g.bindBuffer(g.ARRAY_BUFFER, texBuf);
+      g.enableVertexAttribArray(shader.attribLocations.texCoord);
+      g.vertexAttribPointer(shader.attribLocations.texCoord, 2, g.FLOAT, false, 0, 0);
     }
 
     const perfData = { frameStartTimes: [] as number[], lastReport: 0 };
