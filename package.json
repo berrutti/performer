@@ -19,7 +19,7 @@
     "lint:ci": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "test": "vitest",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc -b"
   },
   "dependencies": {
     "vue": "^3.5.34",
