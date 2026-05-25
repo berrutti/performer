@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, type Ref } from 'vue';
 import { withSetup } from '../../test/utils';
 import { useVideoPlaylist } from './useVideoPlaylist';
 
 describe('useVideoPlaylist', () => {
   let videoElement: HTMLVideoElement;
-  let videoRef: ReturnType<typeof ref<HTMLVideoElement>>;
-  let inputSourceRef: ReturnType<typeof ref<string>>;
+  let videoRef: Ref<HTMLVideoElement | null>;
+  let inputSourceRef: Ref<string>;
 
   beforeEach(() => {
     videoElement = document.createElement('video');
@@ -19,7 +19,7 @@ describe('useVideoPlaylist', () => {
     Object.defineProperty(videoElement, 'currentTime', { writable: true, value: 0 });
     Object.defineProperty(videoElement, 'duration', { writable: true, value: 100 });
 
-    videoRef = ref(videoElement);
+    videoRef = ref<HTMLVideoElement | null>(videoElement);
     inputSourceRef = ref('webcam');
   });
 
