@@ -1,4 +1,5 @@
 import { ref, watch, onMounted } from 'vue';
+import { DEFAULT_BPM } from './useBpmTap';
 
 const KEYS = {
   showHelp: 'performer-showHelp',
@@ -28,7 +29,7 @@ export function useSettings() {
   const showHelp = ref(true);
   const isMuted = ref(false);
   const inputSource = ref('webcam');
-  const bpm = ref(120);
+  const bpm = ref(DEFAULT_BPM);
 
   onMounted(() => {
     const savedShowHelp = load<boolean>(KEYS.showHelp);

@@ -19,7 +19,8 @@ export interface ShaderEffectDef {
   /** 'mapping' effects mutate uv, 'color' effects mutate color, 'feedback' effects read u_history */
   stage: 'mapping' | 'color' | 'feedback';
   glsl: string;
-  intensity?: number; // Optional - if present, effect has intensity control
+  intensity?: number;
+  bpmSync?: boolean;
 }
 
 export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
@@ -32,8 +33,10 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.GRAYSCALE]: {
     stage: 'color',
     glsl: `
-      float l = dot(color.rgb, vec3(0.299,0.587,0.114));
-      color = vec4(vec3(l),1.0);
+      {
+        float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        color = vec4(vec3(luma), 1.0);
+      }
     `
   },
 
@@ -42,136 +45,158 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
     intensity: 1.0,
     glsl: `
       {
-        // REALITY_GLITCH: The ultimate trippy effect with SMOOTH intensity transitions
+        const float GOLDEN_RATIO = 1.618;
+        const float TWO_PI = 6.28318530718;
+        const float NOISE_BASE_SCALE = 2.0;
+        const float NOISE_SCALE_RANGE = 5.0;
+        const float WAVE_BASE_FREQ = 8.0;
+        const float WAVE_FREQ_RANGE = 32.0;
+        const float WAVE_DIAGONAL_SCALE = 0.7;
+        const float SPIRAL_WANDER_AMP = 0.1;
+        const float SPIRAL_BASE_ARMS = 3.0;
+        const float SPIRAL_ARMS_RANGE = 8.0;
+        const float SPIRAL_RADIUS_FREQ = 20.0;
+        const float CORRUPT_BASE_RES = 20.0;
+        const float CORRUPT_RES_RANGE = 80.0;
+        const float CORRUPT_THRESH_BASE = 0.7;
+        const float CORRUPT_THRESH_RANGE = 0.3;
+        const float CORRUPT_SMOOTH_HALF = 0.1;
+        const float TEAR_AMP = 0.3;
+        const float TEAR_SPATIAL_X = 50.0;
+        const float TEAR_SPATIAL_Y = 47.0;
+        const float DISTORTION_SCALE = 0.08;
+        const float JUMP_SCALE = 0.06;
+        const float FEEDBACK_UV_SCALE = 0.5;
+        const float FEEDBACK_NOISE_FREQ = 12.0;
+        const float FEEDBACK_DISTORT_SCALE = 0.05;
+        const float CHROMA_BASE_DENSITY = 5.0;
+        const float CHROMA_DENSITY_RANGE = 15.0;
+        const float CHROMA_PHASE_OFFSET = 2.1;
+        const float CHROMA_DISTORT_SCALE = 0.03;
+        const float STRIP_BASE_COUNT = 20.0;
+        const float STRIP_COUNT_RANGE = 60.0;
+        const float TIME_SNAP_RATE = 10.0;
+        const float BAND_HASH_SALT = 5.1;
+        const float BAND_THRESH_HIGH = 0.92;
+        const float BAND_THRESH_LOW = 0.45;
+        const float BAND_DISTORT_SCALE = 0.5;
+        const float CHAOS_WRAP_LOW = 0.7;
+        const float CHAOS_WRAP_HIGH = 0.9;
+        const vec2 HASH_A = vec2(12.9898, 78.233);
+        const vec2 HASH_B = vec2(93.9898, 67.345);
+        const vec2 HASH_C = vec2(127.1, 311.7);
+        const vec2 HASH_D = vec2(269.5, 183.3);
+        const float HASH_SCALE_A = 43758.5453;
+        const float HASH_SCALE_B = 24634.6345;
+
         float intensity = u_intensity_REALITY_GLITCH;
-        float time = u_time;
-        
-        // Multi-layer chaos noise function
-        vec2 chaos_uv = uv;
-        
-        // Layer 1: Fractal noise distortion - gets more chaotic with intensity
-        float noise_scale = 5.0 + intensity * 25.0;
-        float noise1 = fract(sin(dot(chaos_uv * noise_scale, vec2(12.9898, 78.233))) * 43758.5453);
-        float noise2 = fract(sin(dot(chaos_uv * noise_scale * 1.618, vec2(93.9898, 67.345))) * 24634.6345);
-        
-        // Layer 2: Time-evolving distortion waves - smooth frequency scaling
-        float wave_freq = 8.0 + intensity * 32.0;
-        float wave1 = sin(chaos_uv.x * wave_freq + time * 3.0 + noise1 * 6.28);
-        float wave2 = cos(chaos_uv.y * wave_freq + time * 2.7 + noise2 * 6.28);
-        float wave3 = sin((chaos_uv.x + chaos_uv.y) * wave_freq * 0.7 + time * 4.1);
-        
-        // Layer 3: Spiral chaos - smooth spiral arm scaling
-        vec2 center = vec2(0.5 + sin(time * 0.3) * 0.1, 0.5 + cos(time * 0.23) * 0.1);
-        vec2 spiral_coord = chaos_uv - center;
-        float spiral_r = length(spiral_coord);
-        float spiral_angle = atan(spiral_coord.y, spiral_coord.x);
-        float spiral_arms = 3.0 + intensity * 8.0;
-        float spiral_distort = sin(spiral_angle * spiral_arms + spiral_r * 20.0 + time * 5.0) * spiral_r;
-        
-        // Layer 4: Digital corruption patterns - SMOOTH corruption instead of hard steps
-        vec2 corrupt_uv = floor(chaos_uv * (20.0 + intensity * 80.0)) / (20.0 + intensity * 80.0);
-        float corrupt_hash = fract(sin(dot(corrupt_uv, vec2(127.1, 311.7))) * 43758.5453);
-        // Use smoothstep for gradual corruption instead of hard step
-        float corruption_threshold = 0.7 - intensity * 0.3;
-        float data_corruption = smoothstep(corruption_threshold - 0.1, corruption_threshold + 0.1, corrupt_hash);
-        
-        // Layer 5: Reality tearing - smooth quadratic scaling
-        float tear_intensity = intensity * intensity;
-        vec2 tear_offset = vec2(
-          sin(time * 6.0 + chaos_uv.y * 50.0) * tear_intensity * 0.3,
-          cos(time * 7.3 + chaos_uv.x * 47.0) * tear_intensity * 0.3
+        vec2 workUv = uv;
+
+        float noiseScale = NOISE_BASE_SCALE + intensity * NOISE_SCALE_RANGE;
+        float noise1 = fract(sin(dot(workUv * noiseScale, HASH_A)) * HASH_SCALE_A);
+        float noise2 = fract(sin(dot(workUv * noiseScale * GOLDEN_RATIO, HASH_B)) * HASH_SCALE_B);
+
+        float waveFreq = WAVE_BASE_FREQ + intensity * WAVE_FREQ_RANGE;
+        float wave1 = sin(workUv.x * waveFreq + u_time * 3.0 + noise1 * TWO_PI);
+        float wave2 = cos(workUv.y * waveFreq + u_time * 2.7 + noise2 * TWO_PI);
+        float wave3 = sin((workUv.x + workUv.y) * waveFreq * WAVE_DIAGONAL_SCALE + u_time * 4.1);
+
+        vec2 spiralCenter = vec2(
+          0.5 + sin(u_time * 0.3) * SPIRAL_WANDER_AMP,
+          0.5 + cos(u_time * 0.23) * SPIRAL_WANDER_AMP
         );
-        
-        // Combine all chaos layers with smooth scaling
-        vec2 total_distortion = vec2(
-          (wave1 + spiral_distort + tear_offset.x) * intensity * 0.08,
-          (wave2 + wave3 + tear_offset.y) * intensity * 0.08
-        );
-        
-        // Add SMOOTH corruption jumps - no more hard if statements
-        float jump_x = (noise1 - 0.5) * intensity * 0.4 * data_corruption;
-        float jump_y = (noise2 - 0.5) * intensity * 0.4 * data_corruption;
-        total_distortion += vec2(jump_x, jump_y);
-        
-        // Layer 6: Recursive feedback-like distortion - smooth scaling
-        vec2 feedback_uv = chaos_uv + total_distortion * 0.5;
-        float feedback_noise = fract(sin(dot(feedback_uv * 43.0, vec2(12.9898, 78.233))) * 43758.5453);
-        total_distortion += vec2(
-          sin(feedback_noise * 6.28 + time * 8.0) * intensity * 0.05,
-          cos(feedback_noise * 6.28 + time * 9.2) * intensity * 0.05
-        );
-        
-        // Layer 7: Chromatic separation zones - smooth zone scaling
-        float chroma_zone = floor(chaos_uv.x * (5.0 + intensity * 15.0)) + floor(chaos_uv.y * (5.0 + intensity * 15.0));
-        float chroma_phase = chroma_zone * 2.1 + time * 3.0;
-        vec2 chroma_distort = vec2(
-          sin(chroma_phase) * intensity * 0.03,
-          cos(chroma_phase * 1.3) * intensity * 0.03
+        vec2 spiralCoord = workUv - spiralCenter;
+        float spiralRadius = length(spiralCoord);
+        float spiralAngle = atan(spiralCoord.y, spiralCoord.x);
+        float spiralArms = SPIRAL_BASE_ARMS + intensity * SPIRAL_ARMS_RANGE;
+        float spiralDistort = sin(spiralAngle * spiralArms + spiralRadius * SPIRAL_RADIUS_FREQ + u_time * 5.0) * spiralRadius;
+
+        float corruptResolution = CORRUPT_BASE_RES + intensity * CORRUPT_RES_RANGE;
+        vec2 corruptCell = floor(workUv * corruptResolution) / corruptResolution;
+        float corruptHash = fract(sin(dot(corruptCell, HASH_C)) * HASH_SCALE_A);
+        float corruptThresh = CORRUPT_THRESH_BASE - intensity * CORRUPT_THRESH_RANGE;
+        float dataCorruption = smoothstep(corruptThresh - CORRUPT_SMOOTH_HALF, corruptThresh + CORRUPT_SMOOTH_HALF, corruptHash);
+
+        float tearIntensity = intensity * intensity;
+        vec2 tearOffset = vec2(
+          sin(u_time * 6.0 + workUv.y * TEAR_SPATIAL_X) * tearIntensity * TEAR_AMP,
+          cos(u_time * 7.3 + workUv.x * TEAR_SPATIAL_Y) * tearIntensity * TEAR_AMP
         );
 
-        // Layer 8: Scanline banding — horizontal strips shifted independently
-        // Time is quantized so strips snap rather than drift, giving a digital-corruption feel
-        float strip_count = floor(20.0 + intensity * 60.0);
-        float strip_id = floor(chaos_uv.y * strip_count);
-        float t_snap = floor(time * 10.0);
-        float band_hash = fract(sin(dot(vec2(strip_id, t_snap),       vec2(127.1, 311.7))) * 43758.5453);
-        float band_amt  = fract(sin(dot(vec2(strip_id, t_snap + 5.1), vec2(269.5, 183.3))) * 43758.5453);
-        // At low intensity few strips fire; at high intensity most do
-        float band_active = step(mix(0.92, 0.45, intensity), band_hash);
-        total_distortion.x += (band_amt - 0.5) * intensity * 0.5 * band_active;
+        vec2 totalDistortion = vec2(
+          (wave1 + spiralDistort + tearOffset.x) * intensity * DISTORTION_SCALE,
+          (wave2 + wave3 + tearOffset.y) * intensity * DISTORTION_SCALE
+        );
+        totalDistortion += vec2(
+          (noise1 - 0.5) * intensity * JUMP_SCALE * dataCorruption,
+          (noise2 - 0.5) * intensity * JUMP_SCALE * dataCorruption
+        );
 
-        // Final UV with all distortions applied
-        vec2 final_distorted_uv = chaos_uv + total_distortion + chroma_distort;
-        
-        // SMOOTH transition between wrapped and unwrapped UV coordinates
-        // Instead of hard cut at 0.8, use smooth mix from 0.7 to 0.9 intensity
-        vec2 wrapped_uv = fract(final_distorted_uv);
-        vec2 unwrapped_uv = final_distorted_uv;
-        
-        // Smooth transition factor: 0.0 at intensity 0.7, 1.0 at intensity 0.9
-        float chaos_factor = smoothstep(0.7, 0.9, intensity);
-        uv = mix(wrapped_uv, unwrapped_uv, chaos_factor);
+        vec2 feedbackUv = workUv + totalDistortion * FEEDBACK_UV_SCALE;
+        float feedbackNoise = fract(sin(dot(feedbackUv * FEEDBACK_NOISE_FREQ, HASH_A)) * HASH_SCALE_A);
+        totalDistortion += vec2(
+          sin(feedbackNoise * TWO_PI + u_time * 8.0) * intensity * FEEDBACK_DISTORT_SCALE,
+          cos(feedbackNoise * TWO_PI + u_time * 9.2) * intensity * FEEDBACK_DISTORT_SCALE
+        );
+
+        float chromaDensity = CHROMA_BASE_DENSITY + intensity * CHROMA_DENSITY_RANGE;
+        float chromaZone = floor(workUv.x * chromaDensity) + floor(workUv.y * chromaDensity);
+        float chromaPhase = chromaZone * CHROMA_PHASE_OFFSET + u_time * 3.0;
+        vec2 chromaDistort = vec2(
+          sin(chromaPhase) * intensity * CHROMA_DISTORT_SCALE,
+          cos(chromaPhase * 1.3) * intensity * CHROMA_DISTORT_SCALE
+        );
+
+        float stripCount = floor(STRIP_BASE_COUNT + intensity * STRIP_COUNT_RANGE);
+        float stripId = floor(workUv.y * stripCount);
+        float timeSnap = floor(u_time * TIME_SNAP_RATE);
+        float bandHash = fract(sin(dot(vec2(stripId, timeSnap), HASH_C)) * HASH_SCALE_A);
+        float bandAmt  = fract(sin(dot(vec2(stripId, timeSnap + BAND_HASH_SALT), HASH_D)) * HASH_SCALE_A);
+        // timeSnap quantization makes strips snap rather than drift, giving a digital-corruption feel
+        float bandActive = step(mix(BAND_THRESH_HIGH, BAND_THRESH_LOW, intensity), bandHash);
+        totalDistortion.x += (bandAmt - 0.5) * intensity * BAND_DISTORT_SCALE * bandActive;
+
+        vec2 finalUv = workUv + totalDistortion + chromaDistort;
+        float chaosFactor = smoothstep(CHAOS_WRAP_LOW, CHAOS_WRAP_HIGH, intensity);
+        uv = mix(fract(finalUv), finalUv, chaosFactor);
       }
     `
   },
 
   [ShaderEffect.KALEIDOSCOPE]: {
     stage: 'mapping',
+    bpmSync: true,
     glsl: `
       {
-        // Center the coordinates and add time-based rotation
-        vec2 center = vec2(0.5, 0.5);
-        vec2 c = (uv - center) * 1.5; // 1.5x zoom to see more of the image
-        
-        // Add gentle rotation over time
-        float rotation = u_time * 0.1;
+        const float PI = 3.14159265;
+        const float ZOOM = 1.5;
+        const float ROTATION_SPEED = 0.1;
+        const float BEAT_KICK_AMP = 0.15;
+        const float BEAT_KICK_DECAY = 8.0;
+        const float SLICE_COUNT = 10.0;
+        const float COORD_SCALE = 0.8;
+        const float SAMPLE_OFFSET_Y = 0.4;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float beatKick = exp(-beatPhase * BEAT_KICK_DECAY) * BEAT_KICK_AMP * u_bpm_sync_KALEIDOSCOPE;
+
+        vec2 centered = (uv - 0.5) * ZOOM;
+        float rotation = u_time * ROTATION_SPEED + beatKick;
         float cosR = cos(rotation);
         float sinR = sin(rotation);
-        c = vec2(c.x * cosR - c.y * sinR, c.x * sinR + c.y * cosR);
-        
-        // More slices for complexity and beauty
-        float slices = 10.0;
-        float r = length(c);
-        float a = atan(c.y, c.x);
-        
-        // Create the kaleidoscope mirroring
-        float slice = 2.0 * 3.14159265 / slices;
-        a = mod(a, slice);
-        
-        // Mirror every other slice for more interesting patterns
-        if (mod(floor(atan(c.y, c.x) / slice), 2.0) > 0.5) {
-          a = slice - a;
+        centered = vec2(centered.x * cosR - centered.y * sinR, centered.x * sinR + centered.y * cosR);
+
+        float radius = length(centered);
+        float fullAngle = atan(centered.y, centered.x);
+        float sliceAngle = 2.0 * PI / SLICE_COUNT;
+        float sliceIndex = floor(fullAngle / sliceAngle);
+        float angle = mod(fullAngle, sliceAngle);
+        if (mod(sliceIndex, 2.0) > 0.5) {
+          angle = sliceAngle - angle;
         }
-        
-        // Reconstruct coordinates with better scaling
-        vec2 kaleidoCoord = vec2(cos(a), sin(a)) * r * 0.8; // 0.8 scale for better fit
-        
-        // Offset the sampling area to get more interesting parts of the image
-        // Sample from upper area where face usually is, not dead center
-        uv = kaleidoCoord + vec2(0.5, 0.4);
-        
-        // Keep UV in bounds with wrapping for seamless effect
-        uv = fract(uv);
+
+        uv = fract(vec2(cos(angle), sin(angle)) * radius * COORD_SCALE + vec2(0.5, SAMPLE_OFFSET_Y));
       }
     `
   },
@@ -179,32 +204,43 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.DISPLACE]: {
     stage: 'mapping',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        // Map intensity (0-1) to displacement strength: higher intensity = more displacement
-        float t = u_time * 0.2;
-        float displaceAmount = u_intensity_DISPLACE * 0.08; // 0->0, 1->0.08
-        
-        vec2 displaced_uv = uv;
-        displaced_uv.x += (sin((uv.y+t)*10.0)*0.5+0.5)*displaceAmount;
-        displaced_uv.y += (sin((uv.x+t)*10.0)*0.5+0.5)*displaceAmount;
-        
-        uv = mix(uv, displaced_uv, u_intensity_DISPLACE);
+        const float TIME_SCALE = 0.2;
+        const float MAX_DISPLACEMENT = 0.08;
+        const float WAVE_FREQUENCY = 10.0;
+        const float PULSE_BOOST = 0.5;
+        const float PULSE_DECAY = 6.0;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float pulse = exp(-beatPhase * PULSE_DECAY) * PULSE_BOOST * u_bpm_sync_DISPLACE;
+        float timeOffset = u_time * TIME_SCALE;
+        float displaceAmount = u_intensity_DISPLACE * MAX_DISPLACEMENT * (1.0 + pulse);
+
+        vec2 displacedUv = uv;
+        displacedUv.x += (sin((uv.y + timeOffset) * WAVE_FREQUENCY) * 0.5 + 0.5) * displaceAmount;
+        displacedUv.y += (sin((uv.x + timeOffset) * WAVE_FREQUENCY) * 0.5 + 0.5) * displaceAmount;
+
+        uv = mix(uv, displacedUv, u_intensity_DISPLACE);
       }
     `
   },
 
   [ShaderEffect.SWIRL]: {
     stage: 'mapping',
+    bpmSync: true,
     glsl: `
       {
-        // Convert time to beats and make the cycle last exactly 8 beats
-        float beatTime = (u_time * u_bpm) / 60.0;
-        
-        vec2 c = uv*2.0-1.0;
-        float r = length(c);
-        float a = atan(c.y,c.x) + r*3.0*sin(beatTime * 0.78539816339); // 0.78539816339 = PI/4
-        uv = (vec2(cos(a),sin(a)) * r + 1.0) * 0.5;
+        const float PI_OVER_4 = 0.78539816339;
+        const float SWIRL_STRENGTH = 3.0;
+
+        float beatPhase = (u_time * u_bpm) / 60.0 * u_bpm_sync_SWIRL;
+        vec2 centered = uv * 2.0 - 1.0;
+        float radius = length(centered);
+        float angle = atan(centered.y, centered.x) + radius * SWIRL_STRENGTH * sin(beatPhase * PI_OVER_4);
+        uv = (vec2(cos(angle), sin(angle)) * radius + 1.0) * 0.5;
       }
     `
   },
@@ -212,15 +248,24 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.CHROMA]: {
     stage: 'color',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        float off = 0.01;
+        const float BASE_OFFSET = 0.01;
+        const float PULSE_BOOST = 3.0;
+        const float PULSE_DECAY = 8.0;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float pulse = exp(-beatPhase * PULSE_DECAY) * PULSE_BOOST * u_bpm_sync_CHROMA;
+        float offset = BASE_OFFSET * (1.0 + pulse) * u_intensity_CHROMA;
+
         vec3 chromaDiff = vec3(
-          texture2D(u_image, uv+vec2(off,0)).r - color.r,
+          texture2D(u_image, uv + vec2(offset, 0.0)).r - color.r,
           0.0,
-          texture2D(u_image, uv-vec2(off,0)).b - color.b
+          texture2D(u_image, uv - vec2(offset, 0.0)).b - color.b
         );
-        color.rgb += chromaDiff * u_intensity_CHROMA;
+        color.rgb += chromaDiff;
       }
     `
   },
@@ -228,12 +273,21 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.PIXELATE]: {
     stage: 'mapping',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        // Map intensity (0-1) to pixel size: higher intensity = bigger pixels (more pixelation)
-        float px = 200.0 - (u_intensity_PIXELATE * 190.0); // 0->200, 1->10
-        vec2 pixelated_uv = floor(uv * px) / px;
-        uv = mix(uv, pixelated_uv, u_intensity_PIXELATE);
+        const float MAX_PIXEL_SIZE = 200.0;
+        const float MIN_PIXEL_SIZE = 10.0;
+        const float PULSE_BOOST = 0.3;
+        const float PULSE_DECAY = 6.0;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float pulse = exp(-beatPhase * PULSE_DECAY) * PULSE_BOOST * u_bpm_sync_PIXELATE;
+        float effectiveIntensity = clamp(u_intensity_PIXELATE + pulse, 0.0, 1.0);
+        float pixelSize = mix(MAX_PIXEL_SIZE, MIN_PIXEL_SIZE, effectiveIntensity);
+        vec2 pixelatedUv = floor(uv * pixelSize) / pixelSize;
+        uv = mix(uv, pixelatedUv, effectiveIntensity);
       }
     `
   },
@@ -241,30 +295,51 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.VORONOI]: {
     stage: 'mapping',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        // Map intensity (0-1) to cell density: higher intensity = more cells (more distortion)
-        float cellDensity = 5.0 + (u_intensity_VORONOI * 15.0); // 0->5, 1->20
-        
-        vec2 cell = floor(uv * cellDensity);
-        vec2 f    = fract(uv * cellDensity);
-        float jx = fract(sin(dot(cell,vec2(12.9898,78.233)))*43758.5453);
-        float jy = fract(sin(dot(cell,vec2(93.9898,67.345)))*24634.6345);
-        vec2 voronoi_uv = (cell + vec2(jx,jy) + f) / cellDensity;
-        
-        uv = mix(uv, voronoi_uv, u_intensity_VORONOI);
+        const float BASE_CELL_DENSITY = 5.0;
+        const float CELL_DENSITY_RANGE = 15.0;
+        const float PULSE_BOOST = 0.4;
+        const float PULSE_DECAY = 5.0;
+        const vec2 HASH_A = vec2(12.9898, 78.233);
+        const vec2 HASH_B = vec2(93.9898, 67.345);
+        const float HASH_SCALE_A = 43758.5453;
+        const float HASH_SCALE_B = 24634.6345;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float pulse = exp(-beatPhase * PULSE_DECAY) * PULSE_BOOST * u_bpm_sync_VORONOI;
+        float effectiveIntensity = clamp(u_intensity_VORONOI + pulse, 0.0, 1.0);
+        float cellDensity = BASE_CELL_DENSITY + effectiveIntensity * CELL_DENSITY_RANGE;
+        vec2 cellIndex = floor(uv * cellDensity);
+        vec2 cellFract = fract(uv * cellDensity);
+        float jitterX = fract(sin(dot(cellIndex, HASH_A)) * HASH_SCALE_A);
+        float jitterY = fract(sin(dot(cellIndex, HASH_B)) * HASH_SCALE_B);
+        vec2 voronoiUv = (cellIndex + vec2(jitterX, jitterY) + cellFract) / cellDensity;
+
+        uv = mix(uv, voronoiUv, effectiveIntensity);
       }
     `
   },
 
   [ShaderEffect.RIPPLE]: {
-    stage: 'color',
+    stage: 'mapping',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        float d = length(uv - 0.5);
-        float wave = sin((d - u_time*0.5)*30.0);
-        color.rgb += wave * 0.2 * u_intensity_RIPPLE;
+        const float RING_SHARPNESS = 25.0;
+        const float RING_TRAVEL = 0.85;
+        const float DISPLACEMENT_SCALE = 0.15;
+        const float CENTER_EPSILON = 0.0001;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float distFromCenter = length(uv - 0.5);
+        vec2 outwardDir = normalize(uv - 0.5 + CENTER_EPSILON);
+        float ringStrength = exp(-abs(distFromCenter - beatPhase * RING_TRAVEL) * RING_SHARPNESS) * (1.0 - beatPhase) * u_bpm_sync_RIPPLE;
+        uv += outwardDir * ringStrength * distFromCenter * DISPLACEMENT_SCALE * u_intensity_RIPPLE;
       }
     `
   },
@@ -272,17 +347,23 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.FEEDBACK_ECHO]: {
     stage: 'feedback',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
-        vec2 c = uv - 0.5;
-        float beatTime = (u_time * u_bpm) / 60.0;
-        float rot = beatTime * 0.019635;
-        float cosR = cos(rot);
-        float sinR = sin(rot);
-        c = vec2(c.x * cosR - c.y * sinR, c.x * sinR + c.y * cosR);
-        c *= 1.0 + 0.005 * u_intensity_FEEDBACK_ECHO;
-        vec4 history = texture2D(u_history, clamp(c + 0.5, 0.0, 1.0));
-        color = mix(color, history, mix(0.5, 0.95, u_intensity_FEEDBACK_ECHO));
+        const float ROTATION_PER_BEAT = 0.019635;
+        const float ZOOM_PER_INTENSITY = 0.005;
+        const float MIX_MIN = 0.5;
+        const float MIX_MAX = 0.95;
+
+        float beatPhase = (u_time * u_bpm) / 60.0;
+        float rotationAngle = beatPhase * ROTATION_PER_BEAT * u_bpm_sync_FEEDBACK_ECHO;
+        float cosR = cos(rotationAngle);
+        float sinR = sin(rotationAngle);
+        vec2 centered = uv - 0.5;
+        centered = vec2(centered.x * cosR - centered.y * sinR, centered.x * sinR + centered.y * cosR);
+        centered *= 1.0 + ZOOM_PER_INTENSITY * u_intensity_FEEDBACK_ECHO;
+        vec4 historyColor = texture2D(u_history, clamp(centered + 0.5, 0.0, 1.0));
+        color = mix(color, historyColor, mix(MIX_MIN, MIX_MAX, u_intensity_FEEDBACK_ECHO));
       }
     `
   },
@@ -290,12 +371,19 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.PALETTE_CYCLING]: {
     stage: 'color',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
+        const float TWO_PI = 6.28318530718;
+        const float BEATS_PER_CYCLE = 4.0;
+        const float PHASE_GREEN = 0.333;
+        const float PHASE_BLUE = 0.667;
+
         float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-        float t = luma + u_time * 0.2;
-        vec3 pal = vec3(0.5) + vec3(0.5) * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * t + vec3(0.0, 0.33, 0.67)));
-        color.rgb = mix(color.rgb, pal, u_intensity_PALETTE_CYCLING);
+        float beatsElapsed = (u_time * u_bpm) / 60.0 * u_bpm_sync_PALETTE_CYCLING;
+        float cyclePhase = luma + beatsElapsed / BEATS_PER_CYCLE;
+        vec3 palette = vec3(0.5) + vec3(0.5) * cos(TWO_PI * (vec3(cyclePhase) + vec3(0.0, PHASE_GREEN, PHASE_BLUE)));
+        color.rgb = mix(color.rgb, palette, u_intensity_PALETTE_CYCLING);
       }
     `
   },
@@ -303,19 +391,36 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.CONTOUR]: {
     stage: 'color',
     intensity: 1.0,
+    bpmSync: true,
     glsl: `
       {
+        const float PI = 3.14159265;
+        const float TWO_PI_OVER_3 = 2.09439510239;
+        const float FOUR_PI_OVER_3 = 4.18879020479;
+        const float MIN_BAND_FREQ = 8.0;
+        const float MAX_BAND_FREQ = 40.0;
+        const float LINE_SOFTNESS = 0.15;
+        const float HUE_SCALE = 4.0;
+        const float BEATS_PER_HUE_CYCLE = 8.0;
+        const float PULSE_BOOST = 0.4;
+        const float PULSE_DECAY = 5.0;
+
+        float beatPeriod = 60.0 / u_bpm;
+        float beatPhase = mod(u_time, beatPeriod) / beatPeriod;
+        float pulse = exp(-beatPhase * PULSE_DECAY) * PULSE_BOOST * u_bpm_sync_CONTOUR;
+
         float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-        float freq = mix(8.0, 40.0, u_intensity_CONTOUR);
-        float bands = sin(luma * freq * 3.14159);
-        float line = 1.0 - smoothstep(0.0, 0.15, abs(bands));
-        float hue = luma * 4.0 + u_time * 0.3;
+        float bandFreq = mix(MIN_BAND_FREQ, MAX_BAND_FREQ, clamp(u_intensity_CONTOUR + pulse, 0.0, 1.0));
+        float bandSample = sin(luma * bandFreq * PI);
+        float lineStrength = 1.0 - smoothstep(0.0, LINE_SOFTNESS, abs(bandSample));
+        float beatsElapsed = (u_time * u_bpm) / 60.0 * u_bpm_sync_CONTOUR;
+        float hue = luma * HUE_SCALE + beatsElapsed / BEATS_PER_HUE_CYCLE;
         vec3 lineColor = vec3(
           0.5 + 0.5 * cos(hue),
-          0.5 + 0.5 * cos(hue + 2.094),
-          0.5 + 0.5 * cos(hue + 4.189)
+          0.5 + 0.5 * cos(hue + TWO_PI_OVER_3),
+          0.5 + 0.5 * cos(hue + FOUR_PI_OVER_3)
         );
-        color.rgb = mix(color.rgb, lineColor, line);
+        color.rgb = mix(color.rgb, lineColor, lineStrength);
       }
     `
   }

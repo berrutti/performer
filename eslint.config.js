@@ -6,7 +6,9 @@ import globals from 'globals';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  { ignores: ['dist'] },
+  {
+    ignores: ['dist', 'dist-tauri', 'node_modules', 'src-tauri/target']
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...vue.configs['flat/essential'],

@@ -82,6 +82,7 @@ export interface UseWebGLRendererOptions {
   videoRef: Ref<HTMLVideoElement | null>;
   activeEffects: ComputedRef<Record<ShaderEffect, boolean>>;
   effectIntensities: ComputedRef<Record<ShaderEffect, number>>;
+  bpmSyncEnabled: ComputedRef<Record<ShaderEffect, boolean>>;
   inputSource: Ref<string>;
   bpm: Ref<number>;
   onRenderPerformance?: (fps: number, frameTime: number) => void;
@@ -128,6 +129,9 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
           prog,
           `u_intensity_${effect}`
         );
+      }
+      if (shaderEffects[effect].bpmSync) {
+        uniformLocations[`bpmSync_${effect}`] = gl.getUniformLocation(prog, `u_bpm_sync_${effect}`);
       }
       if (shaderEffects[effect].stage === 'feedback') {
         uniformLocations['history'] = gl.getUniformLocation(prog, 'u_history');
@@ -241,6 +245,7 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
       // Read reactive refs directly - no need to restart on changes
       const currentActiveEffects = options.activeEffects.value;
       const currentIntensities = options.effectIntensities.value;
+      const currentBpmSync = options.bpmSyncEnabled.value;
       const currentBpm = options.bpm.value;
 
       gl.bindTexture(gl.TEXTURE_2D, videoTexture);
@@ -291,6 +296,9 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
 
           const intensityLoc = shader.uniformLocations[`intensity_${effect}`];
           if (intensityLoc) gl.uniform1f(intensityLoc, currentIntensities[effect]);
+
+          const bpmSyncLoc = shader.uniformLocations[`bpmSync_${effect}`];
+          if (bpmSyncLoc) gl.uniform1f(bpmSyncLoc, currentBpmSync[effect] ? 1.0 : 0.0);
 
           gl.drawArrays(gl.TRIANGLES, 0, 6);
           currentTexture = targetRT.texture;

@@ -6,6 +6,7 @@ export const CHANNEL_NAME = 'performer-controls';
 export interface AppState {
   activeEffects: Record<ShaderEffect, boolean>;
   bpm: number;
+  bpmSyncEnabled: Record<ShaderEffect, boolean>;
   currentTime: number;
   duration: number;
   effectIntensities: Record<ShaderEffect, number>;
@@ -26,8 +27,9 @@ export type FromMain =
   | { type: 'state-response'; payload: AppState };
 
 export type FromControls =
-  | { type: 'add-videos'; files: File[] }
+  | { type: 'add-videos'; paths: string[] }
   | { type: 'bpm-change'; bpm: number }
+  | { type: 'bpm-sync-change'; effect: ShaderEffect; enabled: boolean }
   | { type: 'input-source-change'; source: string }
   | { type: 'intensity-change'; effect: ShaderEffect; intensity: number }
   | { type: 'mute-toggle' }

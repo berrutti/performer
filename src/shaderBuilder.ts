@@ -30,6 +30,7 @@ export function createEffectShader(effect: ShaderEffect): string {
   const hasIntensity = effectDef.intensity !== undefined;
 
   const intensityUniform = hasIntensity ? `uniform float u_intensity_${effect};` : '';
+  const bpmSyncUniform = effectDef.bpmSync ? `uniform float u_bpm_sync_${effect};` : '';
 
   if (effectDef.stage === 'feedback') {
     return `
@@ -39,6 +40,7 @@ export function createEffectShader(effect: ShaderEffect): string {
       uniform float u_time;
       uniform float u_bpm;
       ${intensityUniform}
+      ${bpmSyncUniform}
       varying vec2 v_texCoord;
 
       void main() {
@@ -53,42 +55,39 @@ export function createEffectShader(effect: ShaderEffect): string {
   }
 
   if (effectDef.stage === 'mapping') {
-    // Mapping effects modify UV coordinates
     return `
       precision mediump float;
       uniform sampler2D u_image;
       uniform float u_time;
       uniform float u_bpm;
       ${intensityUniform}
+      ${bpmSyncUniform}
       varying vec2 v_texCoord;
-      
+
       void main() {
         vec2 uv = v_texCoord;
-        
-        // Apply mapping effect
+
         ${effectDef.glsl}
-        
-        // Sample with modified UV
+
         gl_FragColor = texture2D(u_image, uv);
       }
     `;
   } else {
-    // Color effects modify the sampled color
     return `
       precision mediump float;
       uniform sampler2D u_image;
       uniform float u_time;
       uniform float u_bpm;
       ${intensityUniform}
+      ${bpmSyncUniform}
       varying vec2 v_texCoord;
-      
+
       void main() {
         vec2 uv = v_texCoord;
         vec4 color = texture2D(u_image, uv);
-        
-        // Apply color effect
+
         ${effectDef.glsl}
-        
+
         gl_FragColor = color;
       }
     `;

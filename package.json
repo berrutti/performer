@@ -9,24 +9,28 @@
     "email": "berrutit@gmail.com",
     "url": "https://github.com/berrutti"
   },
-  "homepage": "https://berrutti.github.io/performer",
   "scripts": {
-    "dev": "vite",
-    "dist": "vue-tsc -b && vite build",
+    "dev": "tauri dev",
+    "dist": "tauri build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:ci": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "test": "vitest",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "typecheck": "vue-tsc -b"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-store": "^2.4.3",
     "vue": "^3.5.34",
     "webmidi": "^3.1.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
+    "@tauri-apps/cli": "^2.11.0",
     "@types/node": "^22.10.5",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitejs/plugin-vue": "^6.0.7",
