@@ -5,10 +5,13 @@
       <input
         type="number"
         class="bpm-input"
-        :value="bpm"
+        :value="localBpm"
         min="40"
         max="300"
         step="1"
+        @focus="bpmFocused = true"
+        @blur="bpmFocused = false"
+        @input="localBpm = Number(($event.target as HTMLInputElement).value)"
         @change="onBpmChange"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
@@ -32,10 +35,11 @@
           activeEffects[effect] ? 'effect-btn--on' : '',
           midiControlledEffects.includes(effect) ? 'effect-btn--midi' : ''
         ]"
-        @click="emit('toggle-effect', effect)"
       >
-        <span class="effect-btn__name">{{ formatName(effect) }}</span>
-        <span v-if="midiControlledEffects.includes(effect)" class="effect-btn__midi-dot" />
+        <button class="effect-btn__toggle" @click="emit('toggle-effect', effect)">
+          <span class="effect-btn__name">{{ formatName(effect) }}</span>
+          <span v-if="midiControlledEffects.includes(effect)" class="effect-btn__midi-dot" />
+        </button>
         <input
           v-if="shaderEffects[effect].intensity !== undefined"
           type="range"
@@ -44,14 +48,19 @@
           max="1"
           step="0.01"
           :value="effectIntensities[effect]"
-          :disabled="
-            !activeEffects[effect] || (midiConnected && midiControlledEffects.includes(effect))
-          "
+          :disabled="midiConnected && midiControlledEffects.includes(effect)"
           @input="
             emit('intensity-change', effect, parseFloat(($event.target as HTMLInputElement).value))
           "
-          @click.stop
         />
+        <button
+          v-if="shaderEffects[effect].bpmSync"
+          class="effect-btn__sync"
+          :class="{ 'effect-btn__sync--on': bpmSyncEnabled[effect] }"
+          @click="emit('bpm-sync-change', effect, !bpmSyncEnabled[effect])"
+        >
+          BPM
+        </button>
       </div>
     </div>
 
@@ -69,13 +78,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { ShaderEffect, shaderEffects } from '../../utils';
 
 const props = withDefaults(
   defineProps<{
     activeEffects: Record<ShaderEffect, boolean>;
     effectIntensities: Record<ShaderEffect, number>;
+    bpmSyncEnabled: Record<ShaderEffect, boolean>;
     showHelp: boolean;
     midiConnected?: boolean;
     midiDeviceName?: string;
@@ -91,6 +101,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'toggle-effect': [effect: ShaderEffect];
   'intensity-change': [effect: ShaderEffect, intensity: number];
+  'bpm-sync-change': [effect: ShaderEffect, enabled: boolean];
   'toggle-help': [];
   'bpm-change': [bpm: number];
 }>();
@@ -125,6 +136,16 @@ const allEffects: ShaderEffect[] = [
   ShaderEffect.CONTOUR
 ];
 
+const localBpm = ref(props.bpm);
+const bpmFocused = ref(false);
+
+watch(
+  () => props.bpm,
+  (val) => {
+    if (!bpmFocused.value) localBpm.value = val;
+  }
+);
+
 function formatName(effect: ShaderEffect): string {
   return effect.replace(/_/g, ' ');
 }
@@ -132,6 +153,7 @@ function formatName(effect: ShaderEffect): string {
 function onBpmChange(e: Event) {
   const val = parseInt((e.target as HTMLInputElement).value, 10);
   if (!isNaN(val) && val >= 40 && val <= 300) {
+    localBpm.value = val;
     emit('bpm-change', val);
   }
 }

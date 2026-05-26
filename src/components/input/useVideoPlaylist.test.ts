@@ -3,6 +3,22 @@ import { ref, nextTick, type Ref } from 'vue';
 import { withSetup } from '../../test/utils';
 import { useVideoPlaylist } from './useVideoPlaylist';
 
+vi.mock('@tauri-apps/api/core', () => ({
+  convertFileSrc: (path: string) => `asset://localhost${path}`
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: vi.fn()
+}));
+
+vi.mock('@tauri-apps/plugin-store', () => ({
+  load: vi.fn().mockResolvedValue({
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockResolvedValue(undefined)
+  })
+}));
+
 describe('useVideoPlaylist', () => {
   let videoElement: HTMLVideoElement;
   let videoRef: Ref<HTMLVideoElement | null>;
@@ -27,10 +43,9 @@ describe('useVideoPlaylist', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize with default video playlist', () => {
+  it('should initialize with empty video playlist', () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    expect(result.videoPlaylist.value).toHaveLength(1);
-    expect(result.videoPlaylist.value[0].name).toBe('Big Buck Bunny');
+    expect(result.videoPlaylist.value).toHaveLength(0);
     expect(result.selectedVideoIndex.value).toBe(0);
     expect(result.loadedVideoIndex.value).toBe(0);
     expect(result.isVideoPlaying.value).toBe(false);
@@ -47,32 +62,22 @@ describe('useVideoPlaylist', () => {
 
   it('should add videos to playlist', async () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const mockFile = new File(['video'], 'test.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([mockFile]);
+    result.handleAddVideosToPlaylist(['/videos/test.mp4']);
     await nextTick();
 
-    expect(result.videoPlaylist.value).toHaveLength(2);
-    expect(result.videoPlaylist.value[1].name).toBe('test.mp4');
+    expect(result.videoPlaylist.value).toHaveLength(1);
+    expect(result.videoPlaylist.value[0].name).toBe('test.mp4');
+    expect(result.videoPlaylist.value[0].src).toBe('asset://localhost/videos/test.mp4');
     expect(inputSourceRef.value).toBe('video');
-    cleanup();
-  });
-
-  it('should filter non-video files when adding to playlist', async () => {
-    const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const videoFile = new File(['video'], 'test.mp4', { type: 'video/mp4' });
-    const textFile = new File(['text'], 'test.txt', { type: 'text/plain' });
-
-    result.handleAddVideosToPlaylist([videoFile, textFile]);
-    await nextTick();
-
-    expect(result.videoPlaylist.value).toHaveLength(2);
-    expect(result.videoPlaylist.value[1].name).toBe('test.mp4');
     cleanup();
   });
 
   it('should remove video from playlist', async () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/video.mp4']);
+    await nextTick();
     const id = result.videoPlaylist.value[0].id;
 
     result.handleRemoveFromPlaylist(id);
@@ -84,22 +89,20 @@ describe('useVideoPlaylist', () => {
 
   it('should adjust selected index when removing video', async () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const file1 = new File(['v1'], 'test1.mp4', { type: 'video/mp4' });
-    const file2 = new File(['v2'], 'test2.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([file1, file2]);
+    result.handleAddVideosToPlaylist(['/v1.mp4', '/v2.mp4']);
     await nextTick();
-    expect(result.videoPlaylist.value).toHaveLength(3);
+    expect(result.videoPlaylist.value).toHaveLength(2);
 
-    result.handleVideoSelect(2);
+    result.handleVideoSelect(1);
     await nextTick();
-    expect(result.selectedVideoIndex.value).toBe(2);
+    expect(result.selectedVideoIndex.value).toBe(1);
 
-    const videoToRemove = result.videoPlaylist.value[2];
+    const videoToRemove = result.videoPlaylist.value[1];
     result.handleRemoveFromPlaylist(videoToRemove.id);
     await nextTick();
 
-    expect(result.selectedVideoIndex.value).toBe(1);
+    expect(result.selectedVideoIndex.value).toBe(0);
     cleanup();
   });
 
@@ -141,9 +144,8 @@ describe('useVideoPlaylist', () => {
   it('should navigate to next video when playing', async () => {
     inputSourceRef.value = 'video';
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const file = new File(['video'], 'test.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([file]);
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
     await nextTick();
     expect(result.videoPlaylist.value).toHaveLength(2);
 
@@ -160,9 +162,8 @@ describe('useVideoPlaylist', () => {
   it('should wrap around to first video when at end', async () => {
     inputSourceRef.value = 'video';
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const file = new File(['video'], 'test.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([file]);
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
     await nextTick();
     result.isVideoPlaying.value = true;
     result.loadedVideoIndex.value = 1;
@@ -176,9 +177,8 @@ describe('useVideoPlaylist', () => {
   it('should navigate to previous video when playing', async () => {
     inputSourceRef.value = 'video';
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const file = new File(['video'], 'test.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([file]);
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
     await nextTick();
     result.isVideoPlaying.value = true;
     result.loadedVideoIndex.value = 1;
@@ -192,9 +192,8 @@ describe('useVideoPlaylist', () => {
   it('should wrap around to last video when at beginning', async () => {
     inputSourceRef.value = 'video';
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
-    const file = new File(['video'], 'test.mp4', { type: 'video/mp4' });
 
-    result.handleAddVideosToPlaylist([file]);
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
     await nextTick();
     result.isVideoPlaying.value = true;
     result.loadedVideoIndex.value = 0;
@@ -233,6 +232,9 @@ describe('useVideoPlaylist', () => {
 
   it('should not navigate when playlist has only one video', async () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/only.mp4']);
+    await nextTick();
     expect(result.videoPlaylist.value).toHaveLength(1);
     const initialIndex = result.selectedVideoIndex.value;
 

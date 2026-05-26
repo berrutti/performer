@@ -9,6 +9,36 @@
     "
     @contextmenu.prevent="openControls"
   >
+    <div v-if="showSplash" id="splash">
+      <svg id="splash-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+        <defs>
+          <radialGradient id="sgm" cx="36%" cy="28%" r="70%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+            <stop offset="18%" stop-color="#ff55c0" stop-opacity="0.95" />
+            <stop offset="58%" stop-color="#cc0077" stop-opacity="0.85" />
+            <stop offset="100%" stop-color="#880055" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="sgc" cx="36%" cy="28%" r="70%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+            <stop offset="18%" stop-color="#00ddff" stop-opacity="0.95" />
+            <stop offset="58%" stop-color="#0099cc" stop-opacity="0.85" />
+            <stop offset="100%" stop-color="#005580" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="sgy" cx="36%" cy="28%" r="70%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+            <stop offset="18%" stop-color="#ffdd33" stop-opacity="0.95" />
+            <stop offset="58%" stop-color="#cc9900" stop-opacity="0.85" />
+            <stop offset="100%" stop-color="#886600" stop-opacity="0" />
+          </radialGradient>
+        </defs>
+        <g style="mix-blend-mode: screen">
+          <circle cx="512" cy="340" r="260" fill="url(#sgm)" />
+          <circle cx="318" cy="686" r="260" fill="url(#sgc)" />
+          <circle cx="706" cy="686" r="260" fill="url(#sgy)" />
+        </g>
+      </svg>
+      <div id="splash-name">performer</div>
+    </div>
     <canvas ref="canvasRef" style="width: 100%; height: 100%; display: block" />
     <video ref="videoRef" style="display: none" crossorigin="anonymous" />
 
@@ -52,6 +82,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onUnmounted, toRaw } from 'vue';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { ShaderEffect, shaderEffects } from '../utils';
 import { useBpmTap } from '../composables/useBpmTap';
 import { useSettings } from '../composables/useSettings';
@@ -72,6 +103,11 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const fps = ref(0);
 const frameTime = ref(0);
 const showMidiSyncNotification = ref(false);
+const showSplash = ref(true);
+
+setTimeout(() => {
+  showSplash.value = false;
+}, 1200);
 
 const initialActiveEffects = Object.values(ShaderEffect).reduce(
   (acc, effect) => ({ ...acc, [effect]: false }),
@@ -86,6 +122,13 @@ const initialIntensities = Object.values(ShaderEffect).reduce(
   },
   {} as Record<ShaderEffect, number>
 );
+
+const initialBpmSync = Object.values(ShaderEffect).reduce(
+  (acc, effect) => ({ ...acc, [effect]: shaderEffects[effect].bpmSync ? true : false }),
+  {} as Record<ShaderEffect, boolean>
+);
+
+const bpmSyncEnabled = ref(initialBpmSync);
 
 const { bpm, isSettingBpm } = useBpmTap();
 const settings = useSettings();
@@ -121,6 +164,7 @@ useWebGLRenderer({
   videoRef,
   activeEffects: effectTransitions.renderingEffects,
   effectIntensities: effectTransitions.renderingIntensities,
+  bpmSyncEnabled: computed(() => bpmSyncEnabled.value),
   inputSource: settings.inputSource,
   bpm,
   onRenderPerformance: handleRenderPerformance
@@ -145,6 +189,7 @@ const midi = useMidi({
 const appState = computed(() => ({
   activeEffects: { ...effectTransitions.activeEffects.value },
   effectIntensities: { ...effectTransitions.effectIntensities.value },
+  bpmSyncEnabled: { ...bpmSyncEnabled.value },
   inputSource: settings.inputSource.value,
   isMuted: settings.isMuted.value,
   midiConnected: midi.connected.value,
@@ -185,6 +230,9 @@ function handleAction(msg: FromControls) {
     case 'bpm-change':
       bpm.value = msg.bpm;
       break;
+    case 'bpm-sync-change':
+      bpmSyncEnabled.value = { ...bpmSyncEnabled.value, [msg.effect]: msg.enabled };
+      break;
     case 'video-select':
       playlist.selectedVideoIndex.value = msg.index;
       break;
@@ -198,7 +246,7 @@ function handleAction(msg: FromControls) {
       playlist.handlePreviousVideo();
       break;
     case 'add-videos':
-      playlist.handleAddVideosToPlaylist(msg.files);
+      playlist.handleAddVideosToPlaylist(msg.paths);
       break;
     case 'remove-from-playlist':
       playlist.handleRemoveFromPlaylist(msg.id);
@@ -231,7 +279,59 @@ onUnmounted(() => {
   channel?.close();
 });
 
-function openControls() {
-  window.open(`${import.meta.env.BASE_URL}#controls`, '_blank');
+async function openControls() {
+  const existing = await WebviewWindow.getByLabel('controls');
+  if (existing) {
+    await existing.show();
+    await existing.setFocus();
+    return;
+  }
+  new WebviewWindow('controls', {
+    url: window.location.href.split('#')[0] + '#controls',
+    title: 'performer',
+    width: 900,
+    height: 700,
+    resizable: true
+  });
 }
 </script>
+
+<style scoped>
+#splash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0a;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  gap: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#splash-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #e8e8e8;
+}
+
+#splash-logo {
+  width: 72px;
+  height: 72px;
+  animation: splash-icon 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes splash-icon {
+  from {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+</style>

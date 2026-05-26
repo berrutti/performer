@@ -1,5 +1,5 @@
 <template>
-  <div v-if="state" style="width: 100vw; height: 100vh; overflow: auto">
+  <div v-if="state" style="width: 100vw; height: 100vh; overflow: hidden">
     <ControlPanel
       :active-effects="state.activeEffects"
       :effect-intensities="state.effectIntensities"
@@ -8,6 +8,7 @@
       :midi-connected="state.midiConnected"
       :midi-device-name="state.midiDeviceName"
       :bpm="state.bpm"
+      :bpm-sync-enabled="state.bpmSyncEnabled"
       :is-setting-bpm="state.isSettingBpm"
       :show-help="state.showHelp"
       :video-playlist="state.videoPlaylist"
@@ -24,11 +25,12 @@
       "
       @toggle-help="send({ type: 'toggle-help' })"
       @bpm-change="send({ type: 'bpm-change', bpm: $event })"
+      @bpm-sync-change="(effect, enabled) => send({ type: 'bpm-sync-change', effect, enabled })"
       @video-select="send({ type: 'video-select', index: $event })"
       @video-play-pause="send({ type: 'video-play-pause' })"
       @next-video="send({ type: 'next-video' })"
       @previous-video="send({ type: 'previous-video' })"
-      @add-videos="send({ type: 'add-videos', files: $event })"
+      @add-videos="onAddVideos"
       @remove-from-playlist="send({ type: 'remove-from-playlist', id: $event })"
       @seek="send({ type: 'seek', time: $event })"
       @seek-start="send({ type: 'seek-start' })"
@@ -40,6 +42,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
+import { open } from '@tauri-apps/plugin-dialog';
 import { CHANNEL_NAME, type AppState, type FromMain, type FromControls } from '../broadcast';
 import ControlPanel from '../components/controls/ControlPanel.vue';
 
@@ -48,6 +51,16 @@ let channel: BroadcastChannel | null = null;
 
 function send(msg: FromControls) {
   channel?.postMessage(msg);
+}
+
+async function onAddVideos() {
+  const selected = await open({
+    multiple: true,
+    filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'] }]
+  });
+  if (!selected) return;
+  const paths = Array.isArray(selected) ? selected : [selected];
+  send({ type: 'add-videos', paths });
 }
 
 onMounted(() => {

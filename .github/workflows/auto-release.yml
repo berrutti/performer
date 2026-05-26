@@ -40,5 +40,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.RELEASE_PAT }}@github.com/${{ github.repository }}
-          npm version ${{ steps.bump.outputs.type }} -m "chore: release v%s"
+          NEXT=$(npm version ${{ steps.bump.outputs.type }} --no-git-tag-version)
+          VERSION=${NEXT#v}
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          cd src-tauri && cargo generate-lockfile && cd ..
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore: release v$VERSION"
+          git tag "v$VERSION"
           git push && git push --tags

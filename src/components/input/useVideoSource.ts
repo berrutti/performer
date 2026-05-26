@@ -1,4 +1,4 @@
-import { watchEffect, onUnmounted, type Ref } from 'vue';
+import { watchEffect, type Ref } from 'vue';
 import type { VideoPlaylistItem } from './useVideoPlaylist';
 
 export function useVideoSource(
@@ -8,15 +8,6 @@ export function useVideoSource(
   videoPlaylist: Ref<VideoPlaylistItem[]>,
   isVideoPlaying: Ref<boolean>
 ) {
-  let currentBlobUrl: string | null = null;
-
-  function revokeBlobUrl() {
-    if (currentBlobUrl) {
-      URL.revokeObjectURL(currentBlobUrl);
-      currentBlobUrl = null;
-    }
-  }
-
   // watchEffect tracks videoRef.value so it re-runs when the template ref is set on mount
   watchEffect(() => {
     const video = videoRef.value;
@@ -26,8 +17,6 @@ export function useVideoSource(
     // access these to track them as deps
     const idx = loadedVideoIndex.value;
     const playlist = videoPlaylist.value;
-
-    revokeBlobUrl();
 
     video.crossOrigin = 'anonymous';
     if (video.srcObject) {
@@ -53,16 +42,8 @@ export function useVideoSource(
     } else if (source === 'video') {
       const loadedVideo = playlist[idx];
       if (loadedVideo) {
-        let newSrc = '';
-        if (loadedVideo.file) {
-          const fileUrl = URL.createObjectURL(loadedVideo.file);
-          currentBlobUrl = fileUrl;
-          newSrc = fileUrl;
-        } else if (loadedVideo.url) {
-          newSrc = loadedVideo.url;
-        }
-        if (video.src !== newSrc) {
-          video.src = newSrc;
+        if (video.src !== loadedVideo.src) {
+          video.src = loadedVideo.src;
           video.loop = false;
           video.load();
         }
@@ -70,9 +51,5 @@ export function useVideoSource(
         video.src = '';
       }
     }
-  });
-
-  onUnmounted(() => {
-    revokeBlobUrl();
   });
 }

@@ -75,23 +75,7 @@
       <div class="playlist-section">
         <div class="playlist-header">
           <span>Playlist ({{ videoPlaylist.length }})</span>
-          <div
-            :class="['add-videos-zone', dragOver ? 'drag-over' : '']"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop="onDrop"
-            @click="fileInputRef?.click()"
-          >
-            <span>+ Add Videos</span>
-            <input
-              ref="fileInputRef"
-              type="file"
-              accept="video/*"
-              multiple
-              style="display: none"
-              @change="onFileInput"
-            />
-          </div>
+          <button class="add-videos-btn" @click="emit('add-videos')">+ Add Videos</button>
         </div>
 
         <div class="playlist-items">
@@ -115,7 +99,7 @@
               <div v-else-if="index === selectedVideoIndex" class="playlist-status">Selected</div>
             </div>
             <button
-              v-if="!video.isDefault"
+              v-if="video.path"
               class="remove-btn"
               title="Remove from playlist"
               @click.stop="emit('remove-from-playlist', video.id)"
@@ -144,14 +128,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 
 interface VideoPlaylistItem {
   id: string;
   name: string;
-  url?: string;
-  file?: File;
-  isDefault?: boolean;
+  src: string;
+  path?: string;
 }
 
 const props = defineProps<{
@@ -172,15 +155,12 @@ const emit = defineEmits<{
   'video-play-pause': [];
   'next-video': [];
   'previous-video': [];
-  'add-videos': [files: File[]];
+  'add-videos': [];
   'remove-from-playlist': [id: string];
   seek: [time: number];
   'seek-start': [];
   'seek-end': [];
 }>();
-
-const dragOver = ref(false);
-const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const currentVideo = computed(() => props.videoPlaylist[props.loadedVideoIndex]);
 const progressPercentage = computed(() =>
@@ -221,19 +201,5 @@ function onTimelineMouseDown(e: MouseEvent) {
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
-}
-
-function onDrop(e: DragEvent) {
-  e.preventDefault();
-  dragOver.value = false;
-  const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('video/'));
-  if (files.length > 0) emit('add-videos', files);
-}
-
-function onFileInput(e: Event) {
-  const files = Array.from((e.target as HTMLInputElement).files ?? []).filter((f) =>
-    f.type.startsWith('video/')
-  );
-  if (files.length > 0) emit('add-videos', files);
 }
 </script>

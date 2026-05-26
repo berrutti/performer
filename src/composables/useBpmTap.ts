@@ -5,7 +5,7 @@ const BPM_TAP_MAX_COUNT = 8;
 const BPM_MIN = 60;
 const BPM_MAX = 200;
 const BPM_ROUNDING = 5;
-const DEFAULT_BPM = 120;
+export const DEFAULT_BPM = 138;
 
 export function useBpmTap() {
   const bpm = ref<number>(DEFAULT_BPM);

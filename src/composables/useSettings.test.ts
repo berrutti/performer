@@ -23,7 +23,7 @@ describe('useSettings', () => {
     expect(result.showHelp.value).toBe(true);
     expect(result.isMuted.value).toBe(false);
     expect(result.inputSource.value).toBe('webcam');
-    expect(result.bpm.value).toBe(120);
+    expect(result.bpm.value).toBe(138);
     cleanup();
   });
 

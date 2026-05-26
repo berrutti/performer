@@ -1,24 +1,21 @@
-import { ref, onMounted, onUnmounted, type Ref } from 'vue';
+import { ref, watch, onMounted, onUnmounted, type Ref } from 'vue';
+import { open } from '@tauri-apps/plugin-dialog';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { load } from '@tauri-apps/plugin-store';
 
 const VIDEO_LOAD_DELAY_MS = 100;
+const STORE_FILE = 'performer.json';
+const STORE_KEY_PLAYLIST = 'playlist';
 
 export interface VideoPlaylistItem {
   id: string;
   name: string;
-  url?: string;
-  file?: File;
-  isDefault?: boolean;
+  src: string;
+  path?: string;
 }
 
 export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSource: Ref<string>) {
-  const videoPlaylist = ref<VideoPlaylistItem[]>([
-    {
-      id: 'big-buck-bunny',
-      name: 'Big Buck Bunny',
-      url: `${import.meta.env.BASE_URL}big_buck_bunny.mp4`,
-      isDefault: true
-    }
-  ]);
+  const videoPlaylist = ref<VideoPlaylistItem[]>([]);
   const selectedVideoIndex = ref(0);
   const loadedVideoIndex = ref(0);
   const isVideoPlaying = ref(false);
@@ -111,17 +108,27 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
     }
   }
 
-  function handleAddVideosToPlaylist(files: File[]) {
-    const videoFiles = files.filter((f) => f.type.startsWith('video/'));
-    const newVideos = videoFiles.map((f) => ({
+  function handleAddVideosToPlaylist(paths: string[]) {
+    const newItems = paths.map((p) => ({
       id: `video-${Date.now()}-${Math.random()}`,
-      name: f.name,
-      file: f
+      name: p.split('/').pop() ?? p,
+      src: convertFileSrc(p),
+      path: p
     }));
-    videoPlaylist.value = [...videoPlaylist.value, ...newVideos];
-    if (newVideos.length > 0 && inputSource.value !== 'video') {
+    videoPlaylist.value = [...videoPlaylist.value, ...newItems];
+    if (newItems.length > 0 && inputSource.value !== 'video') {
       inputSource.value = 'video';
     }
+  }
+
+  async function handleOpenFileDialog() {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'] }]
+    });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    handleAddVideosToPlaylist(paths);
   }
 
   function handleRemoveFromPlaylist(videoId: string) {
@@ -177,13 +184,26 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
     if (video) duration.value = video.duration;
   }
 
-  onMounted(() => {
+  onMounted(async () => {
     const video = videoRef.value;
-    if (!video) return;
-    video.addEventListener('ended', onVideoEnded);
-    video.addEventListener('timeupdate', onTimeUpdate);
-    video.addEventListener('loadedmetadata', onLoadedMetadata);
-    video.addEventListener('durationchange', onDurationChange);
+    if (video) {
+      video.addEventListener('ended', onVideoEnded);
+      video.addEventListener('timeupdate', onTimeUpdate);
+      video.addEventListener('loadedmetadata', onLoadedMetadata);
+      video.addEventListener('durationchange', onDurationChange);
+    }
+
+    const store = await load(STORE_FILE);
+    const savedPaths = (await store.get<string[]>(STORE_KEY_PLAYLIST)) ?? [];
+    if (savedPaths.length > 0) {
+      handleAddVideosToPlaylist(savedPaths);
+    }
+
+    watch(videoPlaylist, async (newList) => {
+      const userPaths = newList.filter((v) => v.path).map((v) => v.path!);
+      await store.set(STORE_KEY_PLAYLIST, userPaths);
+      await store.save();
+    });
   });
 
   onUnmounted(() => {
@@ -209,6 +229,7 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
     handleNextVideo,
     handlePreviousVideo,
     handleAddVideosToPlaylist,
+    handleOpenFileDialog,
     handleRemoveFromPlaylist,
     handleSeek,
     handleSeekStart,

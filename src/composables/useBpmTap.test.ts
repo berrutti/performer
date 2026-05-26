@@ -13,9 +13,9 @@ describe('useBpmTap', () => {
     vi.useRealTimers();
   });
 
-  it('should initialize with default BPM of 120', () => {
+  it('should initialize with default BPM of 138', () => {
     const [result, cleanup] = withSetup(() => useBpmTap());
-    expect(result.bpm.value).toBe(120);
+    expect(result.bpm.value).toBe(138);
     expect(result.isSettingBpm.value).toBe(false);
     cleanup();
   });
