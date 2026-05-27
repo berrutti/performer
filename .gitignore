@@ -7,14 +7,12 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
-dist-tauri
-src-tauri
+dist-tauri/
 
 .DS_Store
 CLAUDE.md
 
-# Tauri
-dist-tauri/
+# Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/
 

@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": ["main", "controls"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-get-all-webviews",
+    "core:webview:allow-webview-show",
+    "core:window:allow-get-all-windows",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "dialog:allow-open",
+    "store:default"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "performer",
+  "version": "1.0.7",
+  "identifier": "com.berrutti.performer",
+  "build": {
+    "frontendDist": "../dist-tauri",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "yarn vite --config vite.tauri.config.ts",
+    "beforeBuildCommand": "yarn vite build --config vite.tauri.config.ts"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "performer",
+        "width": 1280,
+        "height": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
