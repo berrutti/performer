@@ -19,7 +19,8 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "typecheck": "vue-tsc -b"
+    "typecheck": "vue-tsc -b",
+    "ci": "yarn lint:ci && yarn format:check && yarn typecheck && yarn test --run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
@@ -51,6 +52,6 @@
     "vue-tsc": "^2.2.10"
   },
   "simple-git-hooks": {
-    "pre-commit": "yarn lint:ci && yarn format:check"
+    "pre-commit": "yarn ci"
   }
 }
