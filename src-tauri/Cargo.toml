@@ -1,6 +1,6 @@
 [package]
 name = "performer"
-version = "1.0.7"
+version = "1.0.10"
 edition = "2021"
 
 [lib]

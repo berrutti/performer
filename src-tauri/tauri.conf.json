@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "performer",
-  "version": "1.0.7",
+  "version": "1.0.10",
   "identifier": "com.berrutti.performer",
   "build": {
     "frontendDist": "../dist-tauri",
@@ -25,7 +25,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
