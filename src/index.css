@@ -23,12 +23,11 @@ button {
   --color-border-2: #3a3a3a;
   --color-text: #e8e8e8;
   --color-muted: #666;
-  --color-accent: #0080ff;
-  --color-accent-hover: #0066cc;
-  --color-green: #22c55e;
+  --color-accent: #fbbf24;
+  --color-accent-hover: #d97706;
   --color-red: #ef4444;
-  --color-midi: rgba(0, 128, 255, 0.15);
-  --color-midi-border: rgba(0, 128, 255, 0.4);
+  --color-midi: rgba(168, 85, 247, 0.12);
+  --color-midi-border: rgba(168, 85, 247, 0.5);
   --radius: 6px;
   --font: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }

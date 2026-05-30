@@ -93,8 +93,7 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
 
   onMounted(() => {
     const canvas = options.canvasRef.value;
-    const video = options.videoRef.value;
-    if (!canvas || !video) return;
+    if (!canvas) return;
 
     const gl = canvas.getContext('webgl');
     if (!gl) {
@@ -181,13 +180,14 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
     let historyRT: RenderTarget | null = null;
 
     function updateBuffers() {
-      if (!canvas || !gl || !video) return;
+      if (!canvas || !gl) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
       gl.viewport(0, 0, canvas.width, canvas.height);
 
-      const videoWidth = video.videoWidth || 640;
-      const videoHeight = video.videoHeight || 480;
+      const currentVideo = options.videoRef.value;
+      const videoWidth = currentVideo?.videoWidth || 640;
+      const videoHeight = currentVideo?.videoHeight || 480;
       const aspectCoords = getTextureCoordinates(
         videoWidth,
         videoHeight,
@@ -215,7 +215,6 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
 
     updateBuffers();
     window.addEventListener('resize', updateBuffers);
-    video.addEventListener('loadedmetadata', updateBuffers);
 
     function setupAttributes(
       shader: ShaderProgram,
@@ -233,10 +232,25 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
     }
 
     const perfData = { frameStartTimes: [] as number[], lastReport: 0 };
+    let lastVideo: HTMLVideoElement | null = null;
 
     function renderFrame(now: DOMHighResTimeStamp) {
+      const video = options.videoRef.value;
+
+      if (video !== lastVideo) {
+        lastVideo = video;
+        updateBuffers();
+        // Clear to black so the previous source's last frame doesn't linger.
+        if (gl && canvas) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.clearColor(0, 0, 0, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+      }
+
       if (!gl || !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        videoFrameCallbackId = video?.requestVideoFrameCallback(renderFrame) ?? 0;
+        videoFrameCallbackId = requestAnimationFrame(renderFrame);
         return;
       }
 
@@ -315,7 +329,10 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
         gl.uniform1i(ptShader.uniformLocations.image, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        if (currentActiveEffects[ShaderEffect.FEEDBACK_ECHO] && historyRT) {
+        const anyFeedbackActive = Object.values(ShaderEffect).some(
+          (e) => currentActiveEffects[e] && shaderEffects[e].stage === 'feedback'
+        );
+        if (anyFeedbackActive && historyRT) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, historyRT.framebuffer);
           gl.viewport(0, 0, historyRT.width, historyRT.height);
           gl.useProgram(ptShader.program);
@@ -346,15 +363,14 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
         perfData.lastReport = frameStart;
       }
 
-      videoFrameCallbackId = video.requestVideoFrameCallback(renderFrame);
+      videoFrameCallbackId = requestAnimationFrame(renderFrame);
     }
 
-    let videoFrameCallbackId = video.requestVideoFrameCallback(renderFrame);
+    let videoFrameCallbackId = requestAnimationFrame(renderFrame);
 
     cleanup = () => {
-      video.cancelVideoFrameCallback(videoFrameCallbackId);
+      cancelAnimationFrame(videoFrameCallbackId);
       window.removeEventListener('resize', updateBuffers);
-      video.removeEventListener('loadedmetadata', updateBuffers);
       renderTargets.forEach((rt) => {
         gl.deleteFramebuffer(rt.framebuffer);
         gl.deleteTexture(rt.texture);

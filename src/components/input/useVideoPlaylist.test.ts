@@ -26,8 +26,13 @@ describe('useVideoPlaylist', () => {
 
   beforeEach(() => {
     videoElement = document.createElement('video');
-    videoElement.play = vi.fn().mockResolvedValue(undefined);
-    videoElement.pause = vi.fn();
+    videoElement.play = vi.fn().mockImplementation(() => {
+      videoElement.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+    videoElement.pause = vi.fn().mockImplementation(() => {
+      videoElement.dispatchEvent(new Event('pause'));
+    });
     Object.defineProperty(videoElement, 'readyState', {
       writable: true,
       value: HTMLMediaElement.HAVE_CURRENT_DATA
@@ -254,6 +259,72 @@ describe('useVideoPlaylist', () => {
     expect(typeof result.selectedVideoIndex).toBe('object');
     expect(typeof result.loadedVideoIndex).toBe('object');
     expect(typeof result.isVideoPlaying).toBe('object');
+    cleanup();
+  });
+
+  it('handleNextVideo loads next video when paused without calling play', async () => {
+    inputSourceRef.value = 'video';
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
+    await nextTick();
+
+    // Simulate paused state (playing then paused manually)
+    result.videoPausedManually.value = true;
+    result.loadedVideoIndex.value = 0;
+
+    await result.handleNextVideo();
+
+    expect(result.loadedVideoIndex.value).toBe(1);
+    expect(videoElement.play).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('handlePreviousVideo loads previous video when paused without calling play', async () => {
+    inputSourceRef.value = 'video';
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
+    await nextTick();
+
+    result.videoPausedManually.value = true;
+    result.loadedVideoIndex.value = 1;
+
+    await result.handlePreviousVideo();
+
+    expect(result.loadedVideoIndex.value).toBe(0);
+    expect(videoElement.play).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('removing the loaded video stops playback and clears src', async () => {
+    inputSourceRef.value = 'video';
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4']);
+    await nextTick();
+
+    videoElement.dispatchEvent(new Event('play'));
+    expect(result.isVideoPlaying.value).toBe(true);
+
+    const loadedVideo = result.videoPlaylist.value[0];
+    result.handleRemoveFromPlaylist(loadedVideo.id);
+    await nextTick();
+
+    expect(videoElement.pause).toHaveBeenCalled();
+    expect(result.isVideoPlaying.value).toBe(false);
+    cleanup();
+  });
+
+  it('isVideoPlaying resets to false when emptied event fires', async () => {
+    inputSourceRef.value = 'video';
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(videoRef, inputSourceRef));
+
+    videoElement.dispatchEvent(new Event('play'));
+    expect(result.isVideoPlaying.value).toBe(true);
+
+    videoElement.dispatchEvent(new Event('emptied'));
+    expect(result.isVideoPlaying.value).toBe(false);
     cleanup();
   });
 });

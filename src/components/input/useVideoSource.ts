@@ -5,8 +5,7 @@ export function useVideoSource(
   videoRef: Ref<HTMLVideoElement | null>,
   inputSource: Ref<string>,
   loadedVideoIndex: Ref<number>,
-  videoPlaylist: Ref<VideoPlaylistItem[]>,
-  isVideoPlaying: Ref<boolean>
+  videoPlaylist: Ref<VideoPlaylistItem[]>
 ) {
   // watchEffect tracks videoRef.value so it re-runs when the template ref is set on mount
   watchEffect(() => {
@@ -27,10 +26,7 @@ export function useVideoSource(
 
     if (source === 'webcam') {
       video.src = '';
-      video.pause();
-      isVideoPlaying.value = false;
       video.load();
-      video.currentTime = 0;
 
       navigator.mediaDevices
         .getUserMedia({ video: true })
@@ -39,17 +35,8 @@ export function useVideoSource(
           return video.play();
         })
         .catch(console.error);
-    } else if (source === 'video') {
-      const loadedVideo = playlist[idx];
-      if (loadedVideo) {
-        if (video.src !== loadedVideo.src) {
-          video.src = loadedVideo.src;
-          video.loop = false;
-          video.load();
-        }
-      } else {
-        video.src = '';
-      }
+    } else if (source === 'video' && !playlist[idx]) {
+      video.src = '';
     }
   });
 }

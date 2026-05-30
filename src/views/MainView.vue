@@ -41,6 +41,29 @@
     </div>
     <canvas ref="canvasRef" style="width: 100%; height: 100%; display: block" />
     <video ref="videoRef" style="display: none" crossorigin="anonymous" />
+    <video ref="randomizeRef1" style="display: none" preload="auto" crossorigin="anonymous" />
+    <video ref="randomizeRef2" style="display: none" preload="auto" crossorigin="anonymous" />
+
+    <div
+      v-if="showNoVideoMessage"
+      style="
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.3);
+        font-family: var(--font, monospace);
+        font-size: 13px;
+        pointer-events: none;
+      "
+    >
+      {{
+        playlist.videoPlaylist.value.length === 0
+          ? 'right click to open controls and add videos'
+          : 'double-click a video in the playlist to start'
+      }}
+    </div>
 
     <div
       v-if="settings.showHelp.value"
@@ -53,10 +76,10 @@
         pointer-events: none;
       "
     >
-      <div>Right click to open controls | Spacebar to tap BPM</div>
+      <div>Right click to open controls | Spacebar to play / pause</div>
       <div style="font-size: 12px; margin-top: 5px; opacity: 0.8">
         Version: {{ VERSION }} | GPU FPS: {{ fps }} | Frame Time: {{ frameTime.toFixed(2) }}ms
-        <span v-if="midi.connected.value" style="color: #22c55e; margin-left: 10px">
+        <span v-if="midi.connected.value" style="color: #a855f7; margin-left: 10px">
           MIDI: {{ midi.deviceName.value }}
         </span>
         <span v-else style="color: #ef4444; margin-left: 10px">MIDI: Not connected</span>
@@ -81,16 +104,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, watchEffect, onMounted, onUnmounted, toRaw } from 'vue';
+import { ref, shallowRef, computed, watch, watchEffect, onMounted, onUnmounted, toRaw } from 'vue';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { ShaderEffect, shaderEffects } from '../utils';
-import { useBpmTap } from '../composables/useBpmTap';
 import { useSettings } from '../composables/useSettings';
 import { useEffectTransitions } from '../components/effects/useEffectTransitions';
 import { useVideoPlaylist } from '../components/input/useVideoPlaylist';
 import { useVideoSource } from '../components/input/useVideoSource';
 import { useMidi } from '../composables/useMidi';
 import { useWebGLRenderer } from '../composables/useWebGLRenderer';
+import { useRandomizeMode, type RandomizeSnapshot } from '../composables/useRandomizeMode';
 import { CHANNEL_NAME, type FromControls, type FromMain } from '../broadcast';
 import packageJson from '../../package.json';
 
@@ -99,15 +122,19 @@ const MIDI_NOTIFICATION_DURATION_MS = 5000;
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const videoRef = ref<HTMLVideoElement | null>(null);
+const randomizeRef1 = ref<HTMLVideoElement | null>(null);
+const randomizeRef2 = ref<HTMLVideoElement | null>(null);
+const randomizeUseRef1 = ref(true);
+const rendererVideoRef = shallowRef<HTMLVideoElement | null>(null);
 
 const fps = ref(0);
 const frameTime = ref(0);
 const showMidiSyncNotification = ref(false);
 const showSplash = ref(true);
 
-setTimeout(() => {
+onMounted(() => {
   showSplash.value = false;
-}, 1200);
+});
 
 const initialActiveEffects = Object.values(ShaderEffect).reduce(
   (acc, effect) => ({ ...acc, [effect]: false }),
@@ -124,33 +151,127 @@ const initialIntensities = Object.values(ShaderEffect).reduce(
 );
 
 const initialBpmSync = Object.values(ShaderEffect).reduce(
-  (acc, effect) => ({ ...acc, [effect]: shaderEffects[effect].bpmSync ? true : false }),
+  (acc, effect) => ({ ...acc, [effect]: !!shaderEffects[effect].bpmSync }),
   {} as Record<ShaderEffect, boolean>
 );
 
 const bpmSyncEnabled = ref(initialBpmSync);
 
-const { bpm, isSettingBpm } = useBpmTap();
 const settings = useSettings();
+const bpm = settings.bpm;
 const effectTransitions = useEffectTransitions(initialActiveEffects, initialIntensities);
 const playlist = useVideoPlaylist(videoRef, settings.inputSource);
 
-useVideoSource(
-  videoRef,
-  settings.inputSource,
-  playlist.loadedVideoIndex,
+useVideoSource(videoRef, settings.inputSource, playlist.loadedVideoIndex, playlist.videoPlaylist);
+
+function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+  return new Promise((resolve) => {
+    video.addEventListener('loadedmetadata', () => resolve(), { once: true });
+  });
+}
+
+async function preloadUpcomingVideo(snapshot: RandomizeSnapshot) {
+  const standby = randomizeUseRef1.value ? randomizeRef1.value : randomizeRef2.value;
+  const item = playlist.videoPlaylist.value[snapshot.videoIndex];
+  if (!standby || !item) return;
+  if (standby.src !== item.src) {
+    standby.src = item.src;
+    standby.load();
+  }
+  // Seek to the exact play position so the browser buffers the right segment,
+  // not from the beginning of a potentially large file.
+  await waitForVideoMetadata(standby);
+  if (standby.duration > 0) {
+    standby.currentTime = snapshot.seekFraction * standby.duration;
+  }
+}
+
+async function applyRandomizeSnapshot(snapshot: RandomizeSnapshot) {
+  effectTransitions.setActiveEffects(snapshot.effects);
+  effectTransitions.setEffectIntensities(snapshot.intensities);
+
+  if (playlist.videoPlaylist.value.length === 0 || settings.inputSource.value !== 'video') return;
+
+  // Flip synchronously before any await so that the scheduleNext() call that
+  // follows this (synchronously) preloads into the correct next-standby buffer.
+  const standby = randomizeUseRef1.value ? randomizeRef1.value : randomizeRef2.value;
+  randomizeUseRef1.value = !randomizeUseRef1.value;
+
+  if (!standby) return;
+
+  const item = playlist.videoPlaylist.value[snapshot.videoIndex];
+  if (!item) return;
+
+  if (standby.src !== item.src) {
+    standby.src = item.src;
+    await waitForVideoMetadata(standby);
+  } else if (standby.readyState < HTMLMediaElement.HAVE_METADATA) {
+    await waitForVideoMetadata(standby);
+  }
+
+  if (standby.duration > 0) {
+    standby.currentTime = snapshot.seekFraction * standby.duration;
+  }
+
+  standby.muted = settings.isMuted.value;
+
+  // Swap renderer before awaiting play so the seeked frame shows immediately.
+  rendererVideoRef.value = standby;
+
+  try {
+    await standby.play();
+  } catch (err) {
+    if (!(err instanceof DOMException && err.name === 'AbortError')) {
+      console.error('Video playback failed:', err);
+    }
+  }
+
+  playlist.loadedVideoIndex.value = snapshot.videoIndex;
+  playlist.selectedVideoIndex.value = snapshot.videoIndex;
+  playlist.isVideoPlaying.value = true;
+}
+
+const randomize = useRandomizeMode(
+  bpm,
   playlist.videoPlaylist,
-  playlist.isVideoPlaying
+  playlist.loadedVideoIndex,
+  applyRandomizeSnapshot,
+  preloadUpcomingVideo
 );
 
-watch(bpm, (val) => {
-  settings.bpm.value = val;
-});
+watch(
+  videoRef,
+  (v) => {
+    if (!randomize.isActive.value) rendererVideoRef.value = v;
+  },
+  { immediate: true }
+);
+
+watch(
+  () => randomize.isActive.value,
+  (active) => {
+    if (!active) {
+      rendererVideoRef.value = videoRef.value;
+      for (const el of [randomizeRef1.value, randomizeRef2.value]) {
+        if (el) {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        }
+      }
+      randomizeUseRef1.value = true;
+      playlist.isVideoPlaying.value = !(videoRef.value?.paused ?? true);
+    }
+  }
+);
 
 watch(
   () => settings.isMuted.value,
   (muted) => {
     if (videoRef.value) videoRef.value.muted = muted;
+    if (randomizeRef1.value) randomizeRef1.value.muted = muted;
+    if (randomizeRef2.value) randomizeRef2.value.muted = muted;
   }
 );
 
@@ -161,7 +282,7 @@ function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
 
 useWebGLRenderer({
   canvasRef,
-  videoRef,
+  videoRef: rendererVideoRef,
   activeEffects: effectTransitions.renderingEffects,
   effectIntensities: effectTransitions.renderingIntensities,
   bpmSyncEnabled: computed(() => bpmSyncEnabled.value),
@@ -186,16 +307,26 @@ const midi = useMidi({
   }
 });
 
+// Show hint when in video mode and nothing has ever started playing this session.
+// isVideoPlaying and videoPausedManually are reactive (event-driven), so this
+// correctly recomputes when the source or playback state changes.
+const showNoVideoMessage = computed(
+  () =>
+    settings.inputSource.value === 'video' &&
+    !playlist.isVideoPlaying.value &&
+    !playlist.videoPausedManually.value
+);
+
 const appState = computed(() => ({
   activeEffects: { ...effectTransitions.activeEffects.value },
   effectIntensities: { ...effectTransitions.effectIntensities.value },
   bpmSyncEnabled: { ...bpmSyncEnabled.value },
   inputSource: settings.inputSource.value,
   isMuted: settings.isMuted.value,
+  isRandomizeActive: randomize.isActive.value,
   midiConnected: midi.connected.value,
   midiDeviceName: midi.deviceName.value,
   bpm: bpm.value,
-  isSettingBpm: isSettingBpm.value,
   showHelp: settings.showHelp.value,
   videoPlaylist: toRaw(playlist.videoPlaylist.value).map((item) => ({ ...toRaw(item) })),
   selectedVideoIndex: playlist.selectedVideoIndex.value,
@@ -236,6 +367,9 @@ function handleAction(msg: FromControls) {
     case 'video-select':
       playlist.selectedVideoIndex.value = msg.index;
       break;
+    case 'video-play':
+      playlist.handleVideoPlay(msg.index);
+      break;
     case 'video-play-pause':
       playlist.handleVideoPlayPause();
       break;
@@ -260,12 +394,29 @@ function handleAction(msg: FromControls) {
     case 'seek-end':
       playlist.handleSeekEnd();
       break;
+    case 'toggle-randomize':
+      randomize.toggle();
+      break;
   }
+}
+
+function onSpacebar(e: KeyboardEvent) {
+  if (e.repeat) return;
+  if (e.code !== 'Space') return;
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (settings.inputSource.value !== 'video') return;
+  e.preventDefault();
+  playlist.handleVideoPlayPause();
 }
 
 onMounted(() => {
   channel = new BroadcastChannel(CHANNEL_NAME);
   channel.onmessage = (e: MessageEvent<FromControls>) => handleAction(e.data);
+  window.addEventListener('keydown', onSpacebar);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onSpacebar);
 });
 
 watchEffect(() => {

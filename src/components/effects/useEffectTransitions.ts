@@ -96,6 +96,17 @@ export function useEffectTransitions(
     effectIntensities.value = intensities;
   }
 
+  function setActiveEffects(effects: Record<ShaderEffect, boolean>) {
+    const now = performance.now();
+    let newTransitions = effectTransitions.value;
+    Object.values(ShaderEffect).forEach((effect) => {
+      newTransitions = startTransition(newTransitions, effect, effects[effect] ? 1 : 0, now);
+    });
+    activeEffects.value = effects;
+    effectTransitions.value = newTransitions;
+    startAnimationLoop();
+  }
+
   return {
     activeEffects,
     effectIntensities,
@@ -103,6 +114,7 @@ export function useEffectTransitions(
     renderingIntensities,
     handleToggleEffect,
     handleIntensityChange,
-    setEffectIntensities
+    setEffectIntensities,
+    setActiveEffects
   };
 }

@@ -15,8 +15,6 @@
         @change="onBpmChange"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
-      <span v-if="isSettingBpm" class="bpm-tapping">tapping</span>
-      <span class="bpm-hint">or tap spacebar</span>
     </div>
 
     <div v-if="midiConnected" class="midi-status">
@@ -57,9 +55,14 @@
           v-if="shaderEffects[effect].bpmSync"
           class="effect-btn__sync"
           :class="{ 'effect-btn__sync--on': bpmSyncEnabled[effect] }"
+          :title="
+            bpmSyncEnabled[effect]
+              ? 'BPM sync on - click to disable'
+              : 'BPM sync off - click to enable'
+          "
           @click="emit('bpm-sync-change', effect, !bpmSyncEnabled[effect])"
         >
-          BPM
+          {{ bpmSyncEnabled[effect] ? '▶ BPM' : '○ BPM' }}
         </button>
       </div>
     </div>
@@ -90,7 +93,6 @@ const props = withDefaults(
     midiConnected?: boolean;
     midiDeviceName?: string;
     bpm: number;
-    isSettingBpm: boolean;
   }>(),
   {
     midiConnected: false,
@@ -129,6 +131,7 @@ const allEffects: ShaderEffect[] = [
   ShaderEffect.VORONOI,
   ShaderEffect.RIPPLE,
   ShaderEffect.FEEDBACK_ECHO,
+  ShaderEffect.AURORA,
   ShaderEffect.GRAYSCALE,
   ShaderEffect.KALEIDOSCOPE,
   ShaderEffect.SWIRL,
