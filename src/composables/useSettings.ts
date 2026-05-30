@@ -1,5 +1,6 @@
 import { ref, watch, onMounted } from 'vue';
-import { DEFAULT_BPM } from './useBpmTap';
+
+const DEFAULT_BPM = 138;
 
 const KEYS = {
   showHelp: 'performer-showHelp',

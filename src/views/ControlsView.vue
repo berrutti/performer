@@ -5,11 +5,11 @@
       :effect-intensities="state.effectIntensities"
       :input-source="state.inputSource"
       :is-muted="state.isMuted"
+      :is-randomize-active="state.isRandomizeActive"
       :midi-connected="state.midiConnected"
       :midi-device-name="state.midiDeviceName"
       :bpm="state.bpm"
       :bpm-sync-enabled="state.bpmSyncEnabled"
-      :is-setting-bpm="state.isSettingBpm"
       :show-help="state.showHelp"
       :video-playlist="state.videoPlaylist"
       :selected-video-index="state.selectedVideoIndex"
@@ -24,9 +24,11 @@
         (effect, intensity) => send({ type: 'intensity-change', effect, intensity })
       "
       @toggle-help="send({ type: 'toggle-help' })"
+      @toggle-randomize="send({ type: 'toggle-randomize' })"
       @bpm-change="send({ type: 'bpm-change', bpm: $event })"
       @bpm-sync-change="(effect, enabled) => send({ type: 'bpm-sync-change', effect, enabled })"
       @video-select="send({ type: 'video-select', index: $event })"
+      @video-play="send({ type: 'video-play', index: $event })"
       @video-play-pause="send({ type: 'video-play-pause' })"
       @next-video="send({ type: 'next-video' })"
       @previous-video="send({ type: 'previous-video' })"
@@ -56,7 +58,7 @@ function send(msg: FromControls) {
 async function onAddVideos() {
   const selected = await open({
     multiple: true,
-    filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'] }]
+    filters: [{ name: 'Video', extensions: ['mp4', 'm4v', 'mov', 'webm'] }]
   });
   if (!selected) return;
   const paths = Array.isArray(selected) ? selected : [selected];

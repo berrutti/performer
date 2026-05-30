@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { load } from '@tauri-apps/plugin-store';
 
-const VIDEO_LOAD_DELAY_MS = 100;
+const CANPLAY_TIMEOUT_MS = 8000;
 const STORE_FILE = 'performer.json';
 const STORE_KEY_PLAYLIST = 'playlist';
 
@@ -24,82 +24,105 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
   const duration = ref(0);
   const isSeeking = ref(false);
 
+  function waitForCanPlay(video: HTMLVideoElement): Promise<void> {
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(done, CANPLAY_TIMEOUT_MS);
+      video.addEventListener('loadeddata', done, { once: true });
+      video.addEventListener('canplay', done, { once: true });
+      video.addEventListener('error', done, { once: true });
+    });
+  }
+
+  async function startPlayback(video: HTMLVideoElement): Promise<boolean> {
+    try {
+      await video.play();
+      return true;
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        console.error('Video playback failed:', err);
+      }
+      return false;
+    }
+  }
+
   function handleVideoSelect(index: number) {
     selectedVideoIndex.value = index;
   }
 
-  function handleVideoPlayPause() {
+  async function handleVideoPlay(index: number) {
+    selectedVideoIndex.value = index;
+    loadedVideoIndex.value = index;
+    videoPausedManually.value = false;
+    const video = videoRef.value;
+    const item = videoPlaylist.value[index];
+    if (!video || !item) return;
+    // Always reload: if the previous attempt left an error state,
+    // video.src still matches so a conditional check would skip the reload,
+    // leaving the element stuck at readyState 0 with no events firing.
+    video.src = item.src;
+    video.load();
+    await waitForCanPlay(video);
+    await startPlayback(video);
+  }
+
+  async function handleVideoPlayPause() {
     const video = videoRef.value;
     if (!video || inputSource.value !== 'video') return;
 
     if (isVideoPlaying.value) {
       video.pause();
-      isVideoPlaying.value = false;
       videoPausedManually.value = true;
     } else {
-      if (selectedVideoIndex.value !== loadedVideoIndex.value) {
-        loadedVideoIndex.value = selectedVideoIndex.value;
-        videoPausedManually.value = false;
-        setTimeout(() => {
-          const v = videoRef.value;
-          if (v && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            v.play()
-              .then(() => {
-                isVideoPlaying.value = true;
-              })
-              .catch((err) => {
-                if (err.name !== 'AbortError') console.error('Error playing video:', err);
-              });
-          }
-        }, VIDEO_LOAD_DELAY_MS);
-      } else {
-        video
-          .play()
-          .then(() => {
-            isVideoPlaying.value = true;
-            videoPausedManually.value = false;
-          })
-          .catch((err) => {
-            if (err.name !== 'AbortError') console.error('Error playing video:', err);
-          });
-      }
+      videoPausedManually.value = false;
+      await startPlayback(video);
     }
   }
 
-  function handleNextVideo() {
+  async function handleNextVideo() {
     if (videoPlaylist.value.length <= 1) return;
-    if (isVideoPlaying.value) {
+    const videoActive = isVideoPlaying.value || videoPausedManually.value;
+    if (videoActive) {
+      const wasPlaying = isVideoPlaying.value;
       const nextIndex = (loadedVideoIndex.value + 1) % videoPlaylist.value.length;
       loadedVideoIndex.value = nextIndex;
       selectedVideoIndex.value = nextIndex;
-      setTimeout(() => {
-        videoRef.value
-          ?.play()
-          .then(() => {
-            isVideoPlaying.value = true;
-          })
-          .catch(console.error);
-      }, VIDEO_LOAD_DELAY_MS);
+      const video = videoRef.value;
+      const item = videoPlaylist.value[nextIndex];
+      if (!video || !item) return;
+      if (video.src !== item.src) {
+        video.src = item.src;
+        video.load();
+      }
+      await waitForCanPlay(video);
+      if (wasPlaying) await startPlayback(video);
     } else {
       selectedVideoIndex.value = (selectedVideoIndex.value + 1) % videoPlaylist.value.length;
     }
   }
 
-  function handlePreviousVideo() {
+  async function handlePreviousVideo() {
     if (videoPlaylist.value.length <= 1) return;
-    if (isVideoPlaying.value) {
+    const videoActive = isVideoPlaying.value || videoPausedManually.value;
+    if (videoActive) {
+      const wasPlaying = isVideoPlaying.value;
       const prevIndex =
         loadedVideoIndex.value === 0 ? videoPlaylist.value.length - 1 : loadedVideoIndex.value - 1;
       loadedVideoIndex.value = prevIndex;
       selectedVideoIndex.value = prevIndex;
-      setTimeout(() => {
-        videoRef.value
-          ?.play()
-          .then(() => {
-            isVideoPlaying.value = true;
-          })
-          .catch(console.error);
-      }, VIDEO_LOAD_DELAY_MS);
+      const video = videoRef.value;
+      const item = videoPlaylist.value[prevIndex];
+      if (!video || !item) return;
+      if (video.src !== item.src) {
+        video.src = item.src;
+        video.load();
+      }
+      await waitForCanPlay(video);
+      if (wasPlaying) await startPlayback(video);
     } else {
       selectedVideoIndex.value =
         selectedVideoIndex.value === 0
@@ -124,7 +147,7 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
   async function handleOpenFileDialog() {
     const selected = await open({
       multiple: true,
-      filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'] }]
+      filters: [{ name: 'Video', extensions: ['mp4', 'm4v', 'mov', 'webm'] }]
     });
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
@@ -132,7 +155,19 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
   }
 
   function handleRemoveFromPlaylist(videoId: string) {
-    const newPlaylist = videoPlaylist.value.filter((v) => v.id !== videoId);
+    const removedIndex = videoPlaylist.value.findIndex((video) => video.id === videoId);
+    const newPlaylist = videoPlaylist.value.filter((video) => video.id !== videoId);
+
+    if (removedIndex === loadedVideoIndex.value) {
+      const video = videoRef.value;
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      }
+      // isVideoPlaying will be set false by the pause event
+    }
+
     if (selectedVideoIndex.value >= newPlaylist.length) {
       selectedVideoIndex.value = Math.max(0, newPlaylist.length - 1);
     }
@@ -156,6 +191,22 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
 
   function handleSeekEnd() {
     isSeeking.value = false;
+  }
+
+  function onVideoPlay() {
+    isVideoPlaying.value = true;
+  }
+
+  function onVideoPause() {
+    isVideoPlaying.value = false;
+  }
+
+  function onVideoError() {
+    isVideoPlaying.value = false;
+  }
+
+  function onVideoEmptied() {
+    isVideoPlaying.value = false;
   }
 
   function onVideoEnded() {
@@ -187,6 +238,10 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
   onMounted(async () => {
     const video = videoRef.value;
     if (video) {
+      video.addEventListener('play', onVideoPlay);
+      video.addEventListener('pause', onVideoPause);
+      video.addEventListener('emptied', onVideoEmptied);
+      video.addEventListener('error', onVideoError);
       video.addEventListener('ended', onVideoEnded);
       video.addEventListener('timeupdate', onTimeUpdate);
       video.addEventListener('loadedmetadata', onLoadedMetadata);
@@ -209,6 +264,10 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
   onUnmounted(() => {
     const video = videoRef.value;
     if (!video) return;
+    video.removeEventListener('play', onVideoPlay);
+    video.removeEventListener('pause', onVideoPause);
+    video.removeEventListener('emptied', onVideoEmptied);
+    video.removeEventListener('error', onVideoError);
     video.removeEventListener('ended', onVideoEnded);
     video.removeEventListener('timeupdate', onTimeUpdate);
     video.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -225,6 +284,7 @@ export function useVideoPlaylist(videoRef: Ref<HTMLVideoElement | null>, inputSo
     duration,
     isSeeking,
     handleVideoSelect,
+    handleVideoPlay,
     handleVideoPlayPause,
     handleNextVideo,
     handlePreviousVideo,

@@ -14,11 +14,6 @@
     </div>
 
     <div v-if="inputSource === 'video'" class="video-player-container">
-      <div v-if="currentVideo" class="current-video-display">
-        <div class="video-title">{{ currentVideo.name }}</div>
-        <div class="video-position">{{ loadedVideoIndex + 1 }} of {{ videoPlaylist.length }}</div>
-      </div>
-
       <div class="video-controls-bar">
         <div class="transport-controls">
           <button
@@ -45,6 +40,14 @@
           >
             ⏭
           </button>
+          <button
+            class="randomize-btn"
+            :class="{ 'randomize-btn--on': isRandomizeActive }"
+            title="Start / stop random sequence"
+            @click="emit('toggle-randomize')"
+          >
+            rand
+          </button>
         </div>
         <div class="audio-controls">
           <button
@@ -52,7 +55,7 @@
             :title="isMuted ? 'Unmute' : 'Mute'"
             @click="emit('mute-toggle')"
           >
-            {{ isMuted ? 'MUTE' : 'VOL' }}
+            vol
           </button>
         </div>
       </div>
@@ -75,7 +78,7 @@
       <div class="playlist-section">
         <div class="playlist-header">
           <span>Playlist ({{ videoPlaylist.length }})</span>
-          <button class="add-videos-btn" @click="emit('add-videos')">+ Add Videos</button>
+          <button class="add-videos-btn" @click="emit('add-videos')">+ add videos</button>
         </div>
 
         <div class="playlist-items">
@@ -85,18 +88,21 @@
             :class="[
               'playlist-row',
               index === selectedVideoIndex ? 'selected' : '',
+              index === loadedVideoIndex ? 'loaded' : '',
               index === loadedVideoIndex && isVideoPlaying ? 'playing' : ''
             ]"
             style="cursor: pointer"
             @click="emit('video-select', index)"
+            @dblclick="emit('video-play', index)"
           >
             <div class="playlist-number">{{ index + 1 }}</div>
             <div class="playlist-info">
               <div class="playlist-name">{{ video.name }}</div>
               <div v-if="index === loadedVideoIndex" class="playlist-status">
-                {{ isVideoPlaying ? 'Playing' : 'Loaded' }}
+                <span style="display: inline-block; width: 1em; text-align: center">{{
+                  isVideoPlaying ? '▶' : '·'
+                }}</span>
               </div>
-              <div v-else-if="index === selectedVideoIndex" class="playlist-status">Selected</div>
             </div>
             <button
               v-if="video.path"
@@ -120,7 +126,7 @@
           :title="isMuted ? 'Unmute' : 'Mute'"
           @click="emit('mute-toggle')"
         >
-          {{ isMuted ? 'MUTED' : 'ENABLED' }}
+          vol
         </button>
       </div>
     </div>
@@ -128,18 +134,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-
-interface VideoPlaylistItem {
-  id: string;
-  name: string;
-  src: string;
-  path?: string;
-}
+import { computed, onMounted, onUnmounted } from 'vue';
+import type { VideoPlaylistItem } from './useVideoPlaylist';
 
 const props = defineProps<{
   inputSource: string;
   isMuted: boolean;
+  isRandomizeActive: boolean;
   videoPlaylist: VideoPlaylistItem[];
   selectedVideoIndex: number;
   loadedVideoIndex: number;
@@ -151,7 +152,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   'input-source-change': [source: string];
   'mute-toggle': [];
+  'toggle-randomize': [];
   'video-select': [index: number];
+  'video-play': [index: number];
   'video-play-pause': [];
   'next-video': [];
   'previous-video': [];
@@ -162,7 +165,6 @@ const emit = defineEmits<{
   'seek-end': [];
 }>();
 
-const currentVideo = computed(() => props.videoPlaylist[props.loadedVideoIndex]);
 const progressPercentage = computed(() =>
   props.duration > 0 ? (props.currentTime / props.duration) * 100 : 0
 );
@@ -185,21 +187,48 @@ function onTimelineClick(e: MouseEvent) {
 function onTimelineMouseDown(e: MouseEvent) {
   e.preventDefault();
   emit('seek-start');
+  const trackEl = e.currentTarget as HTMLElement;
 
-  const onMove = (ev: MouseEvent) => {
-    const track = document.querySelector('.timeline-track');
-    const rect = track?.getBoundingClientRect();
-    if (rect && props.duration > 0) {
+  function onMove(ev: MouseEvent) {
+    if (props.duration > 0) {
+      const rect = trackEl.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
       emit('seek', pct * props.duration);
     }
-  };
-  const onUp = () => {
+  }
+
+  function onUp() {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
     emit('seek-end');
-  };
+  }
+
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
+
+function onKeyDown(e: KeyboardEvent) {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (props.inputSource !== 'video' || props.videoPlaylist.length === 0) return;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const video = props.videoPlaylist[props.selectedVideoIndex];
+    if (video) emit('video-play', props.selectedVideoIndex);
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    emit('video-select', Math.min(props.selectedVideoIndex + 1, props.videoPlaylist.length - 1));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    emit('video-select', Math.max(props.selectedVideoIndex - 1, 0));
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    const video = props.videoPlaylist[props.selectedVideoIndex];
+    if (!video?.path) return;
+    e.preventDefault();
+    emit('remove-from-playlist', video.id);
+  }
+}
+
+onMounted(() => document.addEventListener('keydown', onKeyDown));
+onUnmounted(() => document.removeEventListener('keydown', onKeyDown));
 </script>

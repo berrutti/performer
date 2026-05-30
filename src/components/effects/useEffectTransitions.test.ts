@@ -18,7 +18,8 @@ describe('useEffectTransitions', () => {
     [ShaderEffect.RIPPLE]: false,
     [ShaderEffect.FEEDBACK_ECHO]: false,
     [ShaderEffect.PALETTE_CYCLING]: false,
-    [ShaderEffect.CONTOUR]: false
+    [ShaderEffect.CONTOUR]: false,
+    [ShaderEffect.AURORA]: false
   };
 
   const initialIntensities: Record<ShaderEffect, number> = {
@@ -34,7 +35,8 @@ describe('useEffectTransitions', () => {
     [ShaderEffect.RIPPLE]: 1,
     [ShaderEffect.FEEDBACK_ECHO]: 1,
     [ShaderEffect.PALETTE_CYCLING]: 1,
-    [ShaderEffect.CONTOUR]: 1
+    [ShaderEffect.CONTOUR]: 1,
+    [ShaderEffect.AURORA]: 1
   };
 
   afterEach(() => {});
@@ -140,6 +142,44 @@ describe('useEffectTransitions', () => {
     await nextTick();
 
     expect(result.effectIntensities.value[ShaderEffect.RIPPLE]).toBe(0.7);
+    cleanup();
+  });
+
+  it('setActiveEffects atomically replaces all effect states', async () => {
+    const [result, cleanup] = withSetup(() =>
+      useEffectTransitions(initialActiveEffects, initialIntensities)
+    );
+
+    const allOn = Object.values(ShaderEffect).reduce(
+      (acc, e) => ({ ...acc, [e]: true }),
+      {} as Record<ShaderEffect, boolean>
+    );
+
+    result.setActiveEffects(allOn);
+    await nextTick();
+
+    Object.values(ShaderEffect).forEach((effect) => {
+      expect(result.activeEffects.value[effect]).toBe(true);
+    });
+    cleanup();
+  });
+
+  it('setActiveEffects turns off effects that were previously on', async () => {
+    const startWithSomeOn = {
+      ...initialActiveEffects,
+      [ShaderEffect.INVERT]: true,
+      [ShaderEffect.CHROMA]: true
+    };
+    const [result, cleanup] = withSetup(() =>
+      useEffectTransitions(startWithSomeOn, initialIntensities)
+    );
+
+    const allOff = { ...initialActiveEffects };
+    result.setActiveEffects(allOff);
+    await nextTick();
+
+    expect(result.activeEffects.value[ShaderEffect.INVERT]).toBe(false);
+    expect(result.activeEffects.value[ShaderEffect.CHROMA]).toBe(false);
     cleanup();
   });
 });

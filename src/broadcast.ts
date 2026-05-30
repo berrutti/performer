@@ -12,7 +12,7 @@ export interface AppState {
   effectIntensities: Record<ShaderEffect, number>;
   inputSource: string;
   isMuted: boolean;
-  isSettingBpm: boolean;
+  isRandomizeActive: boolean;
   isVideoPlaying: boolean;
   loadedVideoIndex: number;
   midiConnected: boolean;
@@ -38,9 +38,11 @@ export type FromControls =
   | { type: 'remove-from-playlist'; id: string }
   | { type: 'request-state' }
   | { type: 'seek-end' }
+  | { type: 'toggle-randomize' }
   | { type: 'seek-start' }
   | { type: 'seek'; time: number }
   | { type: 'toggle-effect'; effect: ShaderEffect }
   | { type: 'toggle-help' }
+  | { type: 'video-play'; index: number }
   | { type: 'video-play-pause' }
   | { type: 'video-select'; index: number };
