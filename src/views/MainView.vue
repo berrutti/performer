@@ -1,14 +1,5 @@
 <template>
-  <div
-    style="
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-      background-color: black;
-      overflow: hidden;
-    "
-    @contextmenu.prevent="openControls"
-  >
+  <div class="main-view" @contextmenu.prevent="openControls">
     <div v-if="showSplash" id="splash">
       <svg id="splash-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
         <defs>
@@ -39,25 +30,16 @@
       </svg>
       <div id="splash-name">performer</div>
     </div>
-    <canvas ref="canvasRef" style="width: 100%; height: 100%; display: block" />
-    <video ref="videoRef" style="display: none" crossorigin="anonymous" />
-    <video ref="randomizeRef1" style="display: none" preload="auto" crossorigin="anonymous" />
-    <video ref="randomizeRef2" style="display: none" preload="auto" crossorigin="anonymous" />
+    <canvas ref="canvasRef" class="main-canvas" />
+    <video ref="videoRef" class="hidden-video" crossorigin="anonymous" />
+    <video ref="randomizeRef1" class="hidden-video" preload="auto" crossorigin="anonymous" />
+    <video ref="randomizeRef2" class="hidden-video" preload="auto" crossorigin="anonymous" />
 
-    <div
-      v-if="showNoVideoMessage"
-      style="
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: rgba(255, 255, 255, 0.3);
-        font-family: var(--font, monospace);
-        font-size: 13px;
-        pointer-events: none;
-      "
-    >
+    <div v-if="showNotRenderableWarning" class="canvas-overlay canvas-overlay--warn">
+      video format not supported by renderer
+    </div>
+
+    <div v-if="showNoVideoMessage" class="canvas-overlay canvas-overlay--hint">
       {{
         playlist.videoPlaylist.value.length === 0
           ? 'right click to open controls and add videos'
@@ -65,38 +47,16 @@
       }}
     </div>
 
-    <div
-      v-if="settings.showHelp.value"
-      style="
-        position: absolute;
-        bottom: 20px;
-        width: 100%;
-        text-align: center;
-        color: white;
-        pointer-events: none;
-      "
-    >
+    <div v-if="settings.showHelp.value" class="help-overlay">
       <div>Right click to open controls | Spacebar to play / pause</div>
-      <div style="font-size: 12px; margin-top: 5px; opacity: 0.8">
+      <div class="help-stats">
         Version: {{ VERSION }} | GPU FPS: {{ fps }} | Frame Time: {{ frameTime.toFixed(2) }}ms
-        <span v-if="midi.connected.value" style="color: #a855f7; margin-left: 10px">
-          MIDI: {{ midi.deviceName.value }}
-        </span>
-        <span v-else style="color: #ef4444; margin-left: 10px">MIDI: Not connected</span>
+        <span v-if="midi.connected.value" class="midi-connected"
+          >MIDI: {{ midi.deviceName.value }}</span
+        >
+        <span v-else class="midi-disconnected">MIDI: Not connected</span>
       </div>
-      <div
-        v-if="showMidiSyncNotification"
-        style="
-          font-size: 14px;
-          margin-top: 10px;
-          color: #ffff00;
-          background-color: rgba(0, 0, 0, 0.8);
-          padding: 10px 20px;
-          border-radius: 4px;
-          display: inline-block;
-          pointer-events: none;
-        "
-      >
+      <div v-if="showMidiSyncNotification" class="midi-sync-notification">
         MIDI Connected! Move each knob slightly to sync with current positions
       </div>
     </div>
@@ -113,7 +73,7 @@ import { useVideoPlaylist } from '@/components/input/useVideoPlaylist';
 import { useVideoPlayer } from '@/components/input/useVideoPlayer';
 import { useVideoSource } from '@/components/input/useVideoSource';
 import { useMidi } from '@/composables/useMidi';
-import { useWebGLRenderer } from '@/composables/useWebGLRenderer';
+import { useWebGPURenderer } from '@/composables/useWebGPURenderer';
 import { useRandomizeMode } from '@/composables/useRandomizeMode';
 import { CHANNEL_NAME, type FromControls, type FromMain } from '@/broadcast';
 import packageJson from '../../package.json';
@@ -130,6 +90,7 @@ const fps = ref(0);
 const frameTime = ref(0);
 const showMidiSyncNotification = ref(false);
 const showSplash = ref(true);
+const showNotRenderableWarning = ref(false);
 
 const initialActiveEffects = buildEffectRecord(() => false);
 const initialIntensities = buildEffectRecord((e) => shaderEffects[e].intensity ?? 0);
@@ -169,12 +130,19 @@ watch(
   }
 );
 
+watch(
+  () => player.isVideoPlaying.value,
+  (playing) => {
+    if (!playing) showNotRenderableWarning.value = false;
+  }
+);
+
 function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
   fps.value = renderFps;
   frameTime.value = renderFrameTime;
 }
 
-useWebGLRenderer({
+useWebGPURenderer({
   canvasRef,
   videoRef: player.rendererVideoRef,
   activeEffects: effectTransitions.renderingEffects,
@@ -182,7 +150,10 @@ useWebGLRenderer({
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
   inputSource: settings.inputSource,
   bpm,
-  onRenderPerformance: handleRenderPerformance
+  onRenderPerformance: handleRenderPerformance,
+  onVideoNotRenderable: () => {
+    showNotRenderableWarning.value = true;
+  }
 });
 
 const midi = useMidi({
@@ -201,29 +172,22 @@ const midi = useMidi({
   }
 });
 
-// Show hint when in video mode and nothing has ever started playing this session.
-// isVideoPlaying and videoPausedManually are reactive (event-driven), so this
-// correctly recomputes when the source or playback state changes.
+// Set once the user has ever started playback — suppresses the hint permanently
+// so a brief not-playing state during video transitions doesn't flash the message.
+const videoEverStarted = ref(false);
+watch(
+  () => player.isVideoPlaying.value,
+  (playing) => {
+    if (playing) videoEverStarted.value = true;
+  }
+);
+
 const showNoVideoMessage = computed(
   () =>
     settings.inputSource.value === 'video' &&
     !player.isVideoPlaying.value &&
-    !player.videoPausedManually.value
-);
-
-// currentTime fires ~4Hz during playback. Throttle it so the full appState
-// isn't serialised and posted cross-tab on every timeupdate event.
-const throttledCurrentTime = ref(0);
-let throttleTimer: number | null = null;
-watch(
-  () => player.currentTime.value,
-  (t) => {
-    if (throttleTimer !== null) return;
-    throttleTimer = window.setTimeout(() => {
-      throttledCurrentTime.value = t;
-      throttleTimer = null;
-    }, 100);
-  }
+    !player.videoPausedManually.value &&
+    !videoEverStarted.value
 );
 
 const appState = computed(() => ({
@@ -241,7 +205,7 @@ const appState = computed(() => ({
   selectedVideoIndex: playlist.selectedVideoIndex.value,
   loadedVideoIndex: player.loadedVideoIndex.value,
   isVideoPlaying: player.isVideoPlaying.value,
-  currentTime: throttledCurrentTime.value,
+  currentTime: player.currentTime.value,
   duration: player.duration.value
 }));
 
@@ -357,6 +321,78 @@ async function openControls() {
 </script>
 
 <style scoped>
+.main-view {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background-color: black;
+  overflow: hidden;
+}
+
+.main-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hidden-video {
+  display: none;
+}
+
+.canvas-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font, monospace);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.canvas-overlay--warn {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.canvas-overlay--hint {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.help-overlay {
+  position: absolute;
+  bottom: 20px;
+  width: 100%;
+  text-align: center;
+  color: white;
+  pointer-events: none;
+}
+
+.help-stats {
+  font-size: 12px;
+  margin-top: 5px;
+  opacity: 0.8;
+}
+
+.midi-connected {
+  color: #a855f7;
+  margin-left: 10px;
+}
+
+.midi-disconnected {
+  color: #ef4444;
+  margin-left: 10px;
+}
+
+.midi-sync-notification {
+  font-size: 14px;
+  margin-top: 10px;
+  color: #ffff00;
+  background-color: rgba(0, 0, 0, 0.8);
+  padding: 10px 20px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
 #splash {
   position: absolute;
   inset: 0;

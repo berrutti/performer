@@ -2,7 +2,7 @@ import { ref, shallowRef, watch, onMounted, onUnmounted, type Ref } from 'vue';
 import type { InputSource } from '@/broadcast';
 import type { VideoPlaylistItem, RemoveVideoResult } from './useVideoPlaylist';
 
-const CANPLAY_TIMEOUT_MS = 8000;
+const CANPLAY_TIMEOUT_MS = 1000;
 
 export interface VideoSnapshot {
   videoIndex: number;
@@ -242,7 +242,7 @@ export function useVideoPlayer(
 
     loadedVideoIndex.value = snapshot.videoIndex;
     selectedVideoIndex.value = snapshot.videoIndex;
-    isVideoPlaying.value = true;
+    // isVideoPlaying will be set by the play event on the standby element
   }
 
   function onRandomizeDeactivated() {
@@ -298,31 +298,46 @@ export function useVideoPlayer(
     if (video) duration.value = video.duration;
   }
 
+  function attachPlaybackListeners(el: HTMLVideoElement) {
+    el.addEventListener('play', onVideoPlay);
+    el.addEventListener('pause', onVideoPause);
+    el.addEventListener('emptied', onVideoEmptied);
+    el.addEventListener('error', onVideoError);
+  }
+
+  function detachPlaybackListeners(el: HTMLVideoElement) {
+    el.removeEventListener('play', onVideoPlay);
+    el.removeEventListener('pause', onVideoPause);
+    el.removeEventListener('emptied', onVideoEmptied);
+    el.removeEventListener('error', onVideoError);
+  }
+
   onMounted(() => {
     const video = videoRef.value;
     if (video) {
-      video.addEventListener('play', onVideoPlay);
-      video.addEventListener('pause', onVideoPause);
-      video.addEventListener('emptied', onVideoEmptied);
-      video.addEventListener('error', onVideoError);
+      attachPlaybackListeners(video);
       video.addEventListener('ended', onVideoEnded);
       video.addEventListener('timeupdate', onTimeUpdate);
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('durationchange', onDurationChange);
     }
+    // Standby elements need play/pause/error/emptied so isVideoPlaying stays
+    // event-driven when randomize mode is active and playing on a standby element.
+    if (randomizeRef1.value) attachPlaybackListeners(randomizeRef1.value);
+    if (randomizeRef2.value) attachPlaybackListeners(randomizeRef2.value);
   });
 
   onUnmounted(() => {
     const video = videoRef.value;
-    if (!video) return;
-    video.removeEventListener('play', onVideoPlay);
-    video.removeEventListener('pause', onVideoPause);
-    video.removeEventListener('emptied', onVideoEmptied);
-    video.removeEventListener('error', onVideoError);
-    video.removeEventListener('ended', onVideoEnded);
-    video.removeEventListener('timeupdate', onTimeUpdate);
-    video.removeEventListener('loadedmetadata', onLoadedMetadata);
-    video.removeEventListener('durationchange', onDurationChange);
+    if (video) {
+      detachPlaybackListeners(video);
+      video.removeEventListener('ended', onVideoEnded);
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('durationchange', onDurationChange);
+    }
+    if (randomizeRef1.value) detachPlaybackListeners(randomizeRef1.value);
+    if (randomizeRef2.value) detachPlaybackListeners(randomizeRef2.value);
   });
 
   return {
