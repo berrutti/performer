@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref } from 'vue';
-import { withSetup } from '../test/utils';
+import { withSetup } from '@/test/utils';
 import { useRandomizeMode } from './useRandomizeMode';
-import { ShaderEffect } from '../utils';
-import type { VideoPlaylistItem } from '../components/input/useVideoPlaylist';
+import { ShaderEffect } from '@/utils';
+import type { VideoPlaylistItem } from '@/components/input/useVideoPlaylist';
 
 function makePlaylist(n: number): VideoPlaylistItem[] {
   return Array.from({ length: n }, (_, i) => ({

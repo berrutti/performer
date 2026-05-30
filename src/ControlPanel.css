@@ -585,10 +585,6 @@
 }
 
 .playlist-row.loaded {
-  border-left: 2px solid var(--color-border-2);
-}
-
-.playlist-row.playing {
   border-left: 2px solid var(--color-accent);
 }
 
@@ -616,12 +612,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.playlist-status {
-  color: var(--color-green);
-  font-size: 10px;
-  margin-top: 2px;
 }
 
 .remove-btn {

@@ -1,4 +1,5 @@
 import { ref, watch, onMounted } from 'vue';
+import type { InputSource } from '@/broadcast';
 
 const DEFAULT_BPM = 138;
 
@@ -29,7 +30,7 @@ function save(key: string, value: unknown): void {
 export function useSettings() {
   const showHelp = ref(true);
   const isMuted = ref(false);
-  const inputSource = ref('webcam');
+  const inputSource = ref<InputSource>('webcam');
   const bpm = ref(DEFAULT_BPM);
 
   onMounted(() => {
@@ -40,7 +41,9 @@ export function useSettings() {
     if (savedMuted !== undefined) isMuted.value = savedMuted;
 
     const savedInputSource = load<string>(KEYS.inputSource);
-    if (savedInputSource !== undefined) inputSource.value = savedInputSource;
+    if (savedInputSource === 'webcam' || savedInputSource === 'video') {
+      inputSource.value = savedInputSource;
+    }
 
     const savedBpm = load<number>(KEYS.bpm);
     if (savedBpm !== undefined) bpm.value = savedBpm;

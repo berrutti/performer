@@ -1,4 +1,10 @@
-// utils.ts
+export function buildEffectRecord<T>(fn: (effect: ShaderEffect) => T): Record<ShaderEffect, T> {
+  return Object.fromEntries(Object.values(ShaderEffect).map((e) => [e, fn(e)])) as Record<
+    ShaderEffect,
+    T
+  >;
+}
+
 export enum ShaderEffect {
   INVERT = 'INVERT',
   GRAYSCALE = 'GRAYSCALE',

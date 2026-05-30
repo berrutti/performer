@@ -1,14 +1,15 @@
 import { watchEffect, type Ref } from 'vue';
 import type { VideoPlaylistItem } from './useVideoPlaylist';
+import type { InputSource } from '@/broadcast';
 
 export function useVideoSource(
   videoRef: Ref<HTMLVideoElement | null>,
-  inputSource: Ref<string>,
+  inputSource: Ref<InputSource>,
   loadedVideoIndex: Ref<number>,
   videoPlaylist: Ref<VideoPlaylistItem[]>
 ) {
   // watchEffect tracks videoRef.value so it re-runs when the template ref is set on mount
-  watchEffect(() => {
+  watchEffect((onCleanup) => {
     const video = videoRef.value;
     if (!video) return;
 
@@ -28,9 +29,18 @@ export function useVideoSource(
       video.src = '';
       video.load();
 
+      let cancelled = false;
+      onCleanup(() => {
+        cancelled = true;
+      });
+
       navigator.mediaDevices
         .getUserMedia({ video: true })
         .then((stream) => {
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           video.srcObject = stream;
           return video.play();
         })

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref, computed } from 'vue';
-import { withSetup } from '../test/utils';
+import { withSetup } from '@/test/utils';
 import { useWebGLRenderer } from './useWebGLRenderer';
-import { ShaderEffect } from '../utils';
+import { ShaderEffect } from '@/utils';
 
 function createMockWebGLContext(): WebGLRenderingContext {
   const FRAMEBUFFER_COMPLETE = 36053;

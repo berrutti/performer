@@ -1,11 +1,11 @@
-import { onMounted, onUnmounted, type Ref, type ComputedRef } from 'vue';
-import { ShaderEffect, shaderEffects, getTextureCoordinates } from '../utils';
+import { onMounted, onUnmounted, watch, type Ref, type ComputedRef } from 'vue';
+import { ShaderEffect, shaderEffects, getTextureCoordinates } from '@/utils';
 import {
   multiPassVertexShader,
   createPassthroughShader,
   createEffectShader,
   createVideoSamplingShader
-} from '../shaderBuilder';
+} from '@/shaderBuilder';
 
 interface RenderTarget {
   framebuffer: WebGLFramebuffer;
@@ -216,19 +216,31 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
     updateBuffers();
     window.addEventListener('resize', updateBuffers);
 
+    // Re-run updateBuffers when the active video element loads new dimensions.
+    // Resize and element-identity changes are already handled; this covers the
+    // case where the same element gets a new src with different native dimensions.
+    watch(
+      options.videoRef,
+      (newVideo, oldVideo) => {
+        if (oldVideo) oldVideo.removeEventListener('loadedmetadata', updateBuffers);
+        if (newVideo) newVideo.addEventListener('loadedmetadata', updateBuffers);
+      },
+      { immediate: true }
+    );
+
     function setupAttributes(
       shader: ShaderProgram,
       posBuf: WebGLBuffer | null,
       texBuf: WebGLBuffer | null
     ) {
       // gl is guaranteed non-null here — setupAttributes is only called after the null guard in onMounted
-      const g = gl!;
-      g.bindBuffer(g.ARRAY_BUFFER, posBuf);
-      g.enableVertexAttribArray(shader.attribLocations.position);
-      g.vertexAttribPointer(shader.attribLocations.position, 2, g.FLOAT, false, 0, 0);
-      g.bindBuffer(g.ARRAY_BUFFER, texBuf);
-      g.enableVertexAttribArray(shader.attribLocations.texCoord);
-      g.vertexAttribPointer(shader.attribLocations.texCoord, 2, g.FLOAT, false, 0, 0);
+      const ctx = gl!;
+      ctx.bindBuffer(ctx.ARRAY_BUFFER, posBuf);
+      ctx.enableVertexAttribArray(shader.attribLocations.position);
+      ctx.vertexAttribPointer(shader.attribLocations.position, 2, ctx.FLOAT, false, 0, 0);
+      ctx.bindBuffer(ctx.ARRAY_BUFFER, texBuf);
+      ctx.enableVertexAttribArray(shader.attribLocations.texCoord);
+      ctx.vertexAttribPointer(shader.attribLocations.texCoord, 2, ctx.FLOAT, false, 0, 0);
     }
 
     const perfData = { frameStartTimes: [] as number[], lastReport: 0 };
@@ -240,6 +252,8 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
       if (video !== lastVideo) {
         lastVideo = video;
         updateBuffers();
+        perfData.frameStartTimes = [];
+        perfData.lastReport = 0;
         // Clear to black so the previous source's last frame doesn't linger.
         if (gl && canvas) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -284,7 +298,7 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
         currentTexture = renderTargets[0].texture;
         currentRTIndex = 1;
 
-        const t = now / 1000;
+        const timeSec = now / 1000;
         activeList.forEach((effect) => {
           const targetRT = renderTargets[currentRTIndex];
           gl.bindFramebuffer(gl.FRAMEBUFFER, targetRT.framebuffer);
@@ -305,7 +319,7 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
             gl.activeTexture(gl.TEXTURE0);
           }
 
-          gl.uniform1f(shader.uniformLocations.time, t);
+          gl.uniform1f(shader.uniformLocations.time, timeSec);
           gl.uniform1f(shader.uniformLocations.bpm, currentBpm);
 
           const intensityLoc = shader.uniformLocations[`intensity_${effect}`];
@@ -371,6 +385,7 @@ export function useWebGLRenderer(options: UseWebGLRendererOptions) {
     cleanup = () => {
       cancelAnimationFrame(videoFrameCallbackId);
       window.removeEventListener('resize', updateBuffers);
+      options.videoRef.value?.removeEventListener('loadedmetadata', updateBuffers);
       renderTargets.forEach((rt) => {
         gl.deleteFramebuffer(rt.framebuffer);
         gl.deleteTexture(rt.texture);

@@ -6,7 +6,7 @@
         id="inputSource"
         class="control-select"
         :value="inputSource"
-        @change="emit('input-source-change', ($event.target as HTMLSelectElement).value)"
+        @change="onInputSourceChange($event)"
       >
         <option value="webcam">Webcam</option>
         <option value="video">Video Playlist</option>
@@ -98,11 +98,6 @@
             <div class="playlist-number">{{ index + 1 }}</div>
             <div class="playlist-info">
               <div class="playlist-name">{{ video.name }}</div>
-              <div v-if="index === loadedVideoIndex" class="playlist-status">
-                <span style="display: inline-block; width: 1em; text-align: center">{{
-                  isVideoPlaying ? '▶' : '·'
-                }}</span>
-              </div>
             </div>
             <button
               v-if="video.path"
@@ -136,9 +131,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue';
 import type { VideoPlaylistItem } from './useVideoPlaylist';
+import type { InputSource } from '@/broadcast';
 
 const props = defineProps<{
-  inputSource: string;
+  inputSource: InputSource;
   isMuted: boolean;
   isRandomizeActive: boolean;
   videoPlaylist: VideoPlaylistItem[];
@@ -150,7 +146,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  'input-source-change': [source: string];
+  'input-source-change': [source: InputSource];
   'mute-toggle': [];
   'toggle-randomize': [];
   'video-select': [index: number];
@@ -164,6 +160,11 @@ const emit = defineEmits<{
   'seek-start': [];
   'seek-end': [];
 }>();
+
+function onInputSourceChange(e: Event) {
+  const val = (e.target as HTMLSelectElement).value;
+  if (val === 'webcam' || val === 'video') emit('input-source-change', val);
+}
 
 const progressPercentage = computed(() =>
   props.duration > 0 ? (props.currentTime / props.duration) * 100 : 0
