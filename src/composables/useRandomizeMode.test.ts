@@ -40,8 +40,8 @@ describe('useRandomizeMode', () => {
     );
     result.toggle();
     onApply.mockClear();
-    // at 60 bpm, minimum wait is 8 beats = 8 s
-    vi.advanceTimersByTime(8000);
+    // at 60 bpm, max wait is 32 beats = 32 s — advance past that to guarantee firing
+    vi.advanceTimersByTime(33000);
     expect(onApply).toHaveBeenCalled();
     cleanup();
   });
