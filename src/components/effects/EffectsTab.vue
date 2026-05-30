@@ -31,12 +31,12 @@
         :class="[
           'effect-btn',
           activeEffects[effect] ? 'effect-btn--on' : '',
-          midiControlledEffects.includes(effect) ? 'effect-btn--midi' : ''
+          midiControlledEffects.has(effect) ? 'effect-btn--midi' : ''
         ]"
       >
         <button class="effect-btn__toggle" @click="emit('toggle-effect', effect)">
           <span class="effect-btn__name">{{ formatName(effect) }}</span>
-          <span v-if="midiControlledEffects.includes(effect)" class="effect-btn__midi-dot" />
+          <span v-if="midiControlledEffects.has(effect)" class="effect-btn__midi-dot" />
         </button>
         <input
           v-if="shaderEffects[effect].intensity !== undefined"
@@ -46,7 +46,7 @@
           max="1"
           step="0.01"
           :value="effectIntensities[effect]"
-          :disabled="midiConnected && midiControlledEffects.includes(effect)"
+          :disabled="midiConnected && midiControlledEffects.has(effect)"
           @input="
             emit('intensity-change', effect, parseFloat(($event.target as HTMLInputElement).value))
           "
@@ -82,7 +82,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ShaderEffect, shaderEffects } from '../../utils';
+import { ShaderEffect, shaderEffects } from '@/utils';
+import { KNOB_CONTROLLED_EFFECTS } from '@/composables/useMidi';
 
 const props = withDefaults(
   defineProps<{
@@ -108,36 +109,12 @@ const emit = defineEmits<{
   'bpm-change': [bpm: number];
 }>();
 
-const midiControlledEffects = computed<ShaderEffect[]>(() => {
-  if (!props.midiConnected) return [];
-  return [
-    ShaderEffect.INVERT,
-    ShaderEffect.REALITY_GLITCH,
-    ShaderEffect.DISPLACE,
-    ShaderEffect.CHROMA,
-    ShaderEffect.PIXELATE,
-    ShaderEffect.VORONOI,
-    ShaderEffect.RIPPLE,
-    ShaderEffect.FEEDBACK_ECHO
-  ];
+const midiControlledEffects = computed<ReadonlySet<ShaderEffect>>(() => {
+  if (!props.midiConnected) return new Set();
+  return KNOB_CONTROLLED_EFFECTS;
 });
 
-const allEffects: ShaderEffect[] = [
-  ShaderEffect.INVERT,
-  ShaderEffect.REALITY_GLITCH,
-  ShaderEffect.DISPLACE,
-  ShaderEffect.CHROMA,
-  ShaderEffect.PIXELATE,
-  ShaderEffect.VORONOI,
-  ShaderEffect.RIPPLE,
-  ShaderEffect.FEEDBACK_ECHO,
-  ShaderEffect.AURORA,
-  ShaderEffect.GRAYSCALE,
-  ShaderEffect.KALEIDOSCOPE,
-  ShaderEffect.SWIRL,
-  ShaderEffect.PALETTE_CYCLING,
-  ShaderEffect.CONTOUR
-];
+const allEffects: ShaderEffect[] = Object.values(ShaderEffect);
 
 const localBpm = ref(props.bpm);
 const bpmFocused = ref(false);

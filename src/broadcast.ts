@@ -3,6 +3,8 @@ import type { VideoPlaylistItem } from './components/input/useVideoPlaylist';
 
 export const CHANNEL_NAME = 'performer-controls';
 
+export type InputSource = 'webcam' | 'video';
+
 export interface AppState {
   activeEffects: Record<ShaderEffect, boolean>;
   bpm: number;
@@ -10,7 +12,7 @@ export interface AppState {
   currentTime: number;
   duration: number;
   effectIntensities: Record<ShaderEffect, number>;
-  inputSource: string;
+  inputSource: InputSource;
   isMuted: boolean;
   isRandomizeActive: boolean;
   isVideoPlaying: boolean;
@@ -22,15 +24,13 @@ export interface AppState {
   videoPlaylist: VideoPlaylistItem[];
 }
 
-export type FromMain =
-  | { type: 'state'; payload: AppState }
-  | { type: 'state-response'; payload: AppState };
+export type FromMain = { type: 'state'; payload: AppState };
 
 export type FromControls =
   | { type: 'add-videos'; paths: string[] }
   | { type: 'bpm-change'; bpm: number }
   | { type: 'bpm-sync-change'; effect: ShaderEffect; enabled: boolean }
-  | { type: 'input-source-change'; source: string }
+  | { type: 'input-source-change'; source: InputSource }
   | { type: 'intensity-change'; effect: ShaderEffect; intensity: number }
   | { type: 'mute-toggle' }
   | { type: 'next-video' }

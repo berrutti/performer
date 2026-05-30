@@ -1,6 +1,6 @@
 import { ref, onUnmounted, type Ref } from 'vue';
-import { ShaderEffect, shaderEffects } from '../utils';
-import type { VideoPlaylistItem } from '../components/input/useVideoPlaylist';
+import { ShaderEffect, shaderEffects } from '@/utils';
+import type { VideoPlaylistItem } from '@/components/input/useVideoPlaylist';
 
 const WAIT_BEATS = [8, 16, 32] as const;
 const KEEP_VIDEO_PROBABILITY = 0.35;

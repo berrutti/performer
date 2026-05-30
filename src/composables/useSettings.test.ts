@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { nextTick } from 'vue';
-import { withSetup } from '../test/utils';
+import { withSetup } from '@/test/utils';
 import { useSettings } from './useSettings';
 
 describe('useSettings', () => {

@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { nextTick } from 'vue';
-import { withSetup } from '../../test/utils';
+import { withSetup } from '@/test/utils';
 import { useEffectTransitions } from './useEffectTransitions';
-import { ShaderEffect } from '../../utils';
+import { ShaderEffect } from '@/utils';
 
 describe('useEffectTransitions', () => {
   const initialActiveEffects: Record<ShaderEffect, boolean> = {

@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { WebMidi, type Input } from 'webmidi';
-import { ShaderEffect } from '../utils';
+import { ShaderEffect } from '@/utils';
 
 export interface MidiConfig {
   onEffectToggle: (effect: ShaderEffect) => void;
@@ -34,6 +34,10 @@ const KNOB_CC_MAPPING: Record<number, ShaderEffect> = {
   27: ShaderEffect.RIPPLE,
   28: ShaderEffect.FEEDBACK_ECHO
 };
+
+export const KNOB_CONTROLLED_EFFECTS: ReadonlySet<ShaderEffect> = new Set(
+  Object.values(KNOB_CC_MAPPING)
+);
 
 export function useMidi(config: MidiConfig) {
   const connected = ref(false);

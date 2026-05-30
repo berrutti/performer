@@ -1,12 +1,12 @@
 import { ref, computed, onUnmounted } from 'vue';
-import { ShaderEffect, shaderEffects } from '../../utils';
+import { ShaderEffect, shaderEffects, buildEffectRecord } from '@/utils';
 import {
   createInitialTransitions,
   startTransition,
   updateTransitions,
   hasActiveTransitions,
   type EffectTransitions
-} from '../../transitions';
+} from '@/transitions';
 
 const DEBOUNCE_DELAY_MS = 50;
 
@@ -16,6 +16,9 @@ export function useEffectTransitions(
 ) {
   const activeEffects = ref<Record<ShaderEffect, boolean>>(initialActiveEffects);
   const effectIntensities = ref<Record<ShaderEffect, number>>({ ...initialIntensities });
+  const bpmSyncEnabled = ref<Record<ShaderEffect, boolean>>(
+    buildEffectRecord((e) => !!shaderEffects[e].bpmSync)
+  );
   const effectTransitions = ref<EffectTransitions>(createInitialTransitions());
   const lastToggleTime: Record<string, number> = {};
   let animationFrameId = 0;
@@ -96,6 +99,10 @@ export function useEffectTransitions(
     effectIntensities.value = intensities;
   }
 
+  function setBpmSyncEnabled(effect: ShaderEffect, enabled: boolean) {
+    bpmSyncEnabled.value = { ...bpmSyncEnabled.value, [effect]: enabled };
+  }
+
   function setActiveEffects(effects: Record<ShaderEffect, boolean>) {
     const now = performance.now();
     let newTransitions = effectTransitions.value;
@@ -110,11 +117,13 @@ export function useEffectTransitions(
   return {
     activeEffects,
     effectIntensities,
+    bpmSyncEnabled,
     renderingEffects,
     renderingIntensities,
     handleToggleEffect,
     handleIntensityChange,
     setEffectIntensities,
-    setActiveEffects
+    setActiveEffects,
+    setBpmSyncEnabled
   };
 }
