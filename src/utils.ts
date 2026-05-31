@@ -31,7 +31,7 @@ export interface ShaderEffectDef {
 }
 
 export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
-  [ShaderEffect.INVERT]: { stage: 'color', intensity: 1.0 },
+  [ShaderEffect.INVERT]: { stage: 'color' },
   [ShaderEffect.GRAYSCALE]: { stage: 'color' },
   [ShaderEffect.REALITY_GLITCH]: { stage: 'feedback', intensity: 1.0, bpmSync: true },
   [ShaderEffect.KALEIDOSCOPE]: { stage: 'mapping', bpmSync: true },
