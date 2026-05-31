@@ -150,9 +150,10 @@ watch(
   }
 );
 
-const { scaledIntensities, onQualityData } = useFrameQualityGuard(
+const { onQualityData } = useFrameQualityGuard(
   computed(() => effectTransitions.renderingEffects.value),
-  effectTransitions.renderingIntensities
+  effectTransitions.renderingIntensities,
+  (effect, intensity) => effectTransitions.handleIntensityChange(effect, intensity)
 );
 
 function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
@@ -164,12 +165,14 @@ useWebGPURenderer({
   canvasRef,
   videoRef: player.rendererVideoRef,
   activeEffects: effectTransitions.renderingEffects,
-  effectIntensities: scaledIntensities,
+  effectIntensities: effectTransitions.renderingIntensities,
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
   inputSource: settings.inputSource,
   bpm,
   onRenderPerformance: handleRenderPerformance,
-  onFrameQuality: onQualityData,
+  onFrameQuality: (lumaAvg, variance) => {
+    if (randomize.isActive.value) onQualityData(lumaAvg, variance);
+  },
   onVideoNotRenderable: () => {
     showNotRenderableWarning.value = true;
   }

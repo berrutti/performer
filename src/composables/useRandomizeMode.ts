@@ -47,40 +47,6 @@ export function useRandomizeMode(
   let intervalStart = 0;
   let intervalTotal = 0;
 
-  // Removes effects from `selected` in-place to prevent combinations that commonly
-  // produce a white or uniform-grey image.
-  function applyExclusionRules(selected: ShaderEffect[]): void {
-    // Max 2 mapping-stage effects — stacking more UV distortions destroys the image.
-    const mapping = selected.filter((e) => shaderEffects[e].stage === 'mapping');
-    if (mapping.length > 2) {
-      const excess = mapping.slice(2);
-      for (const e of excess) selected.splice(selected.indexOf(e), 1);
-    }
-
-    // Max 2 feedback-stage effects — feedback loops amplify to white quickly.
-    const feedback = selected.filter((e) => shaderEffects[e].stage === 'feedback');
-    if (feedback.length > 2) {
-      const excess = feedback.slice(2);
-      for (const e of excess) selected.splice(selected.indexOf(e), 1);
-    }
-
-    // KALEIDOSCOPE + VORONOI together is too extreme — keep whichever came first.
-    if (selected.includes(ShaderEffect.KALEIDOSCOPE) && selected.includes(ShaderEffect.VORONOI)) {
-      selected.splice(selected.indexOf(ShaderEffect.VORONOI), 1);
-    }
-
-    // REALITY_GLITCH with any other feedback effect is already harsh — cap at 1 companion.
-    if (selected.includes(ShaderEffect.REALITY_GLITCH)) {
-      const otherFeedback = selected.filter(
-        (e) => e !== ShaderEffect.REALITY_GLITCH && shaderEffects[e].stage === 'feedback'
-      );
-      if (otherFeedback.length > 1) {
-        const excess = otherFeedback.slice(1);
-        for (const e of excess) selected.splice(selected.indexOf(e), 1);
-      }
-    }
-  }
-
   function buildEffects(): {
     effects: Record<ShaderEffect, boolean>;
     intensities: Record<ShaderEffect, number>;
@@ -108,8 +74,6 @@ export function useRandomizeMode(
       );
       selected.push(candidates[Math.floor(Math.random() * candidates.length)]);
     }
-
-    applyExclusionRules(selected);
 
     for (const e of selected) {
       effects[e] = true;

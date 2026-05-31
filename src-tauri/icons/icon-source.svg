@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- White macOS squircle background -->
+  <rect width="1024" height="1024" rx="224" ry="224" fill="white"/>
+
+  <!--
+    Three circles in an equilateral triangle arrangement.
+    Each circle has radius 190. The triangle is sized so that
+    adjacent circles just touch (side = 2r = 380).
+    Vertically centered at y=512.
+
+    Colors match the app splash screen but as flat fills:
+      magenta  #EE44A8  (top)
+      cyan     #22B8EE  (bottom-left)
+      yellow   #F5C820  (bottom-right)
+  -->
+  <circle cx="512" cy="347" r="190" fill="#EE44A8"/>
+  <circle cx="322" cy="676" r="190" fill="#22B8EE"/>
+  <circle cx="702" cy="676" r="190" fill="#F5C820"/>
+</svg>

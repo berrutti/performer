@@ -1,55 +1,39 @@
-import { ref, computed, type ComputedRef } from 'vue';
-import { ShaderEffect, buildEffectRecord } from '@/utils';
+import { type ComputedRef } from 'vue';
+import { ShaderEffect } from '@/utils';
 
-const STEP_DOWN = 0.12;
-const STEP_UP = 0.04;
-const MIN_OVERRIDE = 0.2;
+const STEP_DOWN = 0.1;
+const MIN_INTENSITY = 0.1;
 const BRIGHT_THRESHOLD = 0.88;
 const UNIFORM_VARIANCE_THRESHOLD = 0.002;
 
-// Receives quality data from the renderer (GPU readback) and applies per-effect
-// intensity overrides: when a bad frame is detected the loudest active effect is
-// stepped down first, so the image recovers one effect at a time rather than all
-// at once. Good frames slowly restore each override toward 1.0.
+// Probes the rendered image via GPU readback (see useWebGPURenderer onFrameQuality).
+// When the frame looks blown-out or uniformly grey, the loudest active effect is stepped
+// down by STEP_DOWN. The change is made directly to the real intensity state — no hidden
+// override layer, no restoration. Subsequent probes will keep stepping until the image
+// clears or all effects are at floor.
 export function useFrameQualityGuard(
   activeEffects: ComputedRef<Record<ShaderEffect, boolean>>,
-  effectIntensities: ComputedRef<Record<ShaderEffect, number>>
+  effectIntensities: ComputedRef<Record<ShaderEffect, number>>,
+  onReduceEffect: (effect: ShaderEffect, intensity: number) => void
 ) {
-  const overrides = ref<Record<ShaderEffect, number>>(buildEffectRecord(() => 1.0));
-
   function onQualityData(lumaAvg: number, variance: number) {
     const isBad = lumaAvg > BRIGHT_THRESHOLD || variance < UNIFORM_VARIANCE_THRESHOLD;
-    const next = { ...overrides.value };
+    if (!isBad) return;
 
-    if (isBad) {
-      const active = (Object.values(ShaderEffect) as ShaderEffect[]).filter(
-        (e) => activeEffects.value[e] && (effectIntensities.value[e] ?? 0) > 0
-      );
-      if (active.length > 0) {
-        const loudest = active.reduce((a, b) =>
-          (effectIntensities.value[a] ?? 0) * next[a] >= (effectIntensities.value[b] ?? 0) * next[b]
-            ? a
-            : b
-        );
-        next[loudest] = Math.max(MIN_OVERRIDE, next[loudest] - STEP_DOWN);
-      }
-    } else {
-      for (const e of Object.values(ShaderEffect) as ShaderEffect[]) {
-        if (next[e] < 1.0) next[e] = Math.min(1.0, next[e] + STEP_UP);
-      }
-    }
+    const active = (Object.values(ShaderEffect) as ShaderEffect[]).filter(
+      (e) => activeEffects.value[e] && (effectIntensities.value[e] ?? 0) > MIN_INTENSITY
+    );
+    if (active.length === 0) return;
 
-    overrides.value = next;
+    const loudest = active.reduce((a, b) =>
+      (effectIntensities.value[a] ?? 0) >= (effectIntensities.value[b] ?? 0) ? a : b
+    );
+
+    onReduceEffect(
+      loudest,
+      Math.max(MIN_INTENSITY, (effectIntensities.value[loudest] ?? 0) - STEP_DOWN)
+    );
   }
 
-  const scaledIntensities = computed<Record<ShaderEffect, number>>(() => {
-    const ov = overrides.value;
-    const raw = effectIntensities.value;
-    if ((Object.values(ov) as number[]).every((v) => v >= 1.0)) return raw;
-    return Object.fromEntries(
-      (Object.entries(raw) as [ShaderEffect, number][]).map(([e, v]) => [e, v * ov[e]])
-    ) as Record<ShaderEffect, number>;
-  });
-
-  return { scaledIntensities, onQualityData };
+  return { onQualityData };
 }
