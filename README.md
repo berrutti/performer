@@ -2,6 +2,8 @@
 
 Perform with live video or VODs and apply effects to them.
 
+![performer screenshot](assets/screenshot.png)
+
 Right-click the canvas to open the controls in a separate tab. Use a webcam or load your own video files.
 
 It supports connecting a Launchkey Mini MK3 to control effects and intensity via MIDI.
