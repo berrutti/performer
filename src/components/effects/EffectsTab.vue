@@ -8,13 +8,16 @@
         :value="localBpm"
         min="40"
         max="300"
-        step="1"
+        step="0.1"
         @focus="bpmFocused = true"
         @blur="bpmFocused = false"
         @input="localBpm = Number(($event.target as HTMLInputElement).value)"
         @change="onBpmChange"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
+      <span v-if="randomizeBeat" class="beat-counter">
+        {{ randomizeBeat.beat }}&thinsp;/&thinsp;{{ randomizeBeat.total }}
+      </span>
     </div>
 
     <div v-if="midiConnected" class="midi-status">
@@ -72,7 +75,7 @@
         id="show-help"
         type="checkbox"
         class="control-checkbox"
-        :checked="showHelp"
+        :checked="helpVisible"
         @change="emit('toggle-help')"
       />
       <label for="show-help" class="checkbox-label">Show help overlay</label>
@@ -90,14 +93,16 @@ const props = withDefaults(
     activeEffects: Record<ShaderEffect, boolean>;
     effectIntensities: Record<ShaderEffect, number>;
     bpmSyncEnabled: Record<ShaderEffect, boolean>;
-    showHelp: boolean;
+    helpVisible: boolean;
     midiConnected?: boolean;
     midiDeviceName?: string;
     bpm: number;
+    randomizeBeat?: { beat: number; total: number } | null;
   }>(),
   {
     midiConnected: false,
-    midiDeviceName: ''
+    midiDeviceName: '',
+    randomizeBeat: null
   }
 );
 
@@ -131,7 +136,7 @@ function formatName(effect: ShaderEffect): string {
 }
 
 function onBpmChange(e: Event) {
-  const val = parseInt((e.target as HTMLInputElement).value, 10);
+  const val = parseFloat((e.target as HTMLInputElement).value);
   if (!isNaN(val) && val >= 40 && val <= 300) {
     localBpm.value = val;
     emit('bpm-change', val);

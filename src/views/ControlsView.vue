@@ -29,10 +29,11 @@
         :active-effects="state.activeEffects"
         :effect-intensities="state.effectIntensities"
         :bpm-sync-enabled="state.bpmSyncEnabled"
-        :show-help="state.showHelp"
+        :helpVisible="state.isHelpVisible"
         :midi-connected="state.midiConnected"
         :midi-device-name="state.midiDeviceName"
         :bpm="state.bpm"
+        :randomize-beat="state.randomizeBeat"
         @toggle-effect="send({ type: 'toggle-effect', effect: $event })"
         @intensity-change="
           (effect, intensity) => send({ type: 'intensity-change', effect, intensity })

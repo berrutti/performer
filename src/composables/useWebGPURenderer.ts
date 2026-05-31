@@ -6,6 +6,8 @@ import {
   blitShader,
   passthroughShader,
   createEffectShaderWGSL,
+  rdStepShader,
+  rdCompositeShader,
   UNIFORMS_FLOAT_COUNT,
   UNIFORM_IDX
 } from '@/shaderBuilderWGSL';
@@ -21,6 +23,7 @@ export interface UseWebGPURendererOptions {
   bpm: Ref<number>;
   onRenderPerformance?: (fps: number, frameTime: number) => void;
   onVideoNotRenderable?: () => void;
+  onFrameQuality?: (lumaAvg: number, variance: number) => void;
 }
 
 const TEXTURE_FORMAT: GPUTextureFormat = 'rgba8unorm';
@@ -75,7 +78,6 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
     const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device, format: canvasFormat, alphaMode: 'opaque' });
 
-    // ── Vertex buffer ──────────────────────────────────────────────────────────
     const vertexBuffer = device.createBuffer({
       size: QUAD_VERTICES.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
@@ -90,17 +92,23 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       ]
     };
 
-    // ── Uniform buffer ─────────────────────────────────────────────────────────
     const uniformBuffer = device.createBuffer({
       size: UNIFORMS_FLOAT_COUNT * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
     const uniformData = new Float32Array(UNIFORMS_FLOAT_COUNT);
 
-    // ── Sampler ────────────────────────────────────────────────────────────────
     const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
 
-    // ── Bind group layouts ─────────────────────────────────────────────────────
+    // 64 pixels × 4 bytes = 256 bytes — exactly one WebGPU-aligned row.
+    // Used to sample a horizontal strip from the center of the final render target.
+    const qualityReadbackBuffer = device.createBuffer({
+      size: 256,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
+    let qualityFrameCount = 0;
+    let qualityReadbackPending = false;
+
     const externalTextureBGL = device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.FRAGMENT, externalTexture: {} },
@@ -124,7 +132,13 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
     });
 
     const uniformBGL = device.createBindGroupLayout({
-      entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }]
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform' }
+        }
+      ]
     });
 
     const uniformBindGroup = device.createBindGroup({
@@ -132,7 +146,6 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       entries: [{ binding: 0, resource: { buffer: uniformBuffer } }]
     });
 
-    // ── Pipeline helper ────────────────────────────────────────────────────────
     const vsModule = device.createShaderModule({ code: vertexShader });
 
     function makePipeline(
@@ -156,25 +169,28 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       });
     }
 
-    // ── Pipelines ──────────────────────────────────────────────────────────────
     const blitPipeline = makePipeline(blitShader, externalTextureBGL, TEXTURE_FORMAT);
 
     const effectPipelines = new Map<ShaderEffect, GPURenderPipeline>();
     for (const effect of Object.values(ShaderEffect)) {
+      const wgsl = createEffectShaderWGSL(effect);
+      if (wgsl === null) continue;
       const bgl = shaderEffects[effect].stage === 'feedback' ? feedbackTextureBGL : textureBGL;
-      effectPipelines.set(
-        effect,
-        makePipeline(createEffectShaderWGSL(effect), bgl, TEXTURE_FORMAT)
-      );
+      effectPipelines.set(effect, makePipeline(wgsl, bgl, TEXTURE_FORMAT));
     }
 
     const passthroughPipeline = makePipeline(passthroughShader, textureBGL, canvasFormat);
 
-    // ── Render targets ─────────────────────────────────────────────────────────
+    // RD uses regular render pipelines — no compute, no special texture formats.
+    // Both step and composite use feedbackTextureBGL (image + sampler + second texture).
+    const rdStepPipeline = makePipeline(rdStepShader, feedbackTextureBGL, TEXTURE_FORMAT);
+    const rdCompositePipeline = makePipeline(rdCompositeShader, feedbackTextureBGL, TEXTURE_FORMAT);
+
     let renderTargets: [GPUTexture, GPUTexture] | null = null;
     let historyTexture: GPUTexture | null = null;
     let rtBindGroups: [GPUBindGroup, GPUBindGroup] | null = null;
     let historyBindGroups: [GPUBindGroup, GPUBindGroup] | null = null;
+    let rdTextures: [GPUTexture, GPUTexture] | null = null;
 
     function createTexture(w: number, h: number): GPUTexture {
       return device.createTexture({
@@ -185,6 +201,14 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
           GPUTextureUsage.RENDER_ATTACHMENT |
           GPUTextureUsage.COPY_SRC |
           GPUTextureUsage.COPY_DST
+      });
+    }
+
+    function createRDTexture(w: number, h: number): GPUTexture {
+      return device.createTexture({
+        size: [w, h],
+        format: TEXTURE_FORMAT,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
       });
     }
 
@@ -215,15 +239,20 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       renderTargets?.[0].destroy();
       renderTargets?.[1].destroy();
       historyTexture?.destroy();
+      rdTextures?.[0].destroy();
+      rdTextures?.[1].destroy();
 
       const w = canvas.width;
       const h = canvas.height;
       const rt0 = createTexture(w, h);
       const rt1 = createTexture(w, h);
       const hist = createTexture(w, h);
+      const rdA = createRDTexture(w, h);
+      const rdB = createRDTexture(w, h);
 
       renderTargets = [rt0, rt1];
       historyTexture = hist;
+      rdTextures = [rdA, rdB];
 
       rtBindGroups = [
         device.createBindGroup({
@@ -261,6 +290,24 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
         })
       ];
 
+      // Clear both RD textures to A=1, B=0 (R=1, G=0 — stable rest state).
+      // Patterns seed in naturally from video luminance within a few seconds.
+      const initEnc = device.createCommandEncoder();
+      for (const rdTex of [rdA, rdB]) {
+        const clearPass = initEnc.beginRenderPass({
+          colorAttachments: [
+            {
+              view: rdTex.createView(),
+              loadOp: 'clear',
+              storeOp: 'store',
+              clearValue: { r: 1, g: 0, b: 0, a: 1 }
+            }
+          ]
+        });
+        clearPass.end();
+      }
+      device.queue.submit([initEnc.finish()]);
+
       // Update aspect ratio crop for the new canvas size
       const video = options.videoRef.value;
       const [uMin, uMax, vMin, vMax] = computeCrop(
@@ -287,7 +334,6 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       { immediate: true }
     );
 
-    // ── Render loop ────────────────────────────────────────────────────────────
     const perfData = { frameTimes: [] as number[], lastReport: 0 };
     let lastVideo: HTMLVideoElement | null = null;
     let videoWasReady = false;
@@ -393,6 +439,8 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
         intensities[ShaderEffect.PALETTE_CYCLING] ?? 1;
       uniformData[UNIFORM_IDX.intensity.CONTOUR] = intensities[ShaderEffect.CONTOUR] ?? 1;
       uniformData[UNIFORM_IDX.intensity.AURORA] = intensities[ShaderEffect.AURORA] ?? 1;
+      uniformData[UNIFORM_IDX.intensity.REACTION_DIFFUSION] =
+        intensities[ShaderEffect.REACTION_DIFFUSION] ?? 1;
 
       uniformData[UNIFORM_IDX.bpmSync.REALITY_GLITCH] = bpmSync[ShaderEffect.REALITY_GLITCH]
         ? 1
@@ -410,6 +458,9 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
         : 0;
       uniformData[UNIFORM_IDX.bpmSync.CONTOUR] = bpmSync[ShaderEffect.CONTOUR] ? 1 : 0;
       uniformData[UNIFORM_IDX.bpmSync.AURORA] = bpmSync[ShaderEffect.AURORA] ? 1 : 0;
+      uniformData[UNIFORM_IDX.bpmSync.REACTION_DIFFUSION] = bpmSync[ShaderEffect.REACTION_DIFFUSION]
+        ? 1
+        : 0;
 
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
@@ -447,30 +498,91 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       // Effect passes — ping-pong between RT[0] and RT[1].
       // After the blit, RT[0] holds the video frame. srcIdx tracks which is current.
       let srcIdx = 0;
+      let rdSrcIdx = 0; // which rdTexture holds the latest RD state this frame
+
       for (const effect of activeList) {
-        const dstIdx = 1 - srcIdx;
-        const pipeline = effectPipelines.get(effect)!;
-        const bg =
-          shaderEffects[effect].stage === 'feedback'
-            ? historyBindGroups[srcIdx]
-            : rtBindGroups[srcIdx];
-        const effectPass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: renderTargets[dstIdx].createView(),
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 }
-            }
-          ]
-        });
-        effectPass.setPipeline(pipeline);
-        effectPass.setBindGroup(0, bg);
-        effectPass.setBindGroup(1, uniformBindGroup);
-        effectPass.setVertexBuffer(0, vertexBuffer);
-        effectPass.draw(6);
-        effectPass.end();
-        srcIdx = dstIdx;
+        const dstIdx = (1 - srcIdx) as 0 | 1;
+
+        if (effect === ShaderEffect.REACTION_DIFFUSION && rdTextures) {
+          // 4 render-pass RD steps per frame (even count — rdSrcIdx ends at 0 every frame).
+          for (let iter = 0; iter < 4; iter++) {
+            const rdDstIdx = (1 - rdSrcIdx) as 0 | 1;
+            const stepBG = device.createBindGroup({
+              layout: feedbackTextureBGL,
+              entries: [
+                { binding: 0, resource: rdTextures[rdSrcIdx].createView() },
+                { binding: 1, resource: sampler },
+                { binding: 2, resource: renderTargets[srcIdx].createView() }
+              ]
+            });
+            const stepPass = enc.beginRenderPass({
+              colorAttachments: [
+                {
+                  view: rdTextures[rdDstIdx].createView(),
+                  loadOp: 'load',
+                  storeOp: 'store'
+                }
+              ]
+            });
+            stepPass.setPipeline(rdStepPipeline);
+            stepPass.setBindGroup(0, stepBG);
+            stepPass.setBindGroup(1, uniformBindGroup);
+            stepPass.setVertexBuffer(0, vertexBuffer);
+            stepPass.draw(6);
+            stepPass.end();
+            rdSrcIdx = rdDstIdx;
+          }
+
+          // Composite rdTextures[0] (always the result after 4 even steps) + RT[src] → RT[dst].
+          const rdCompBG = device.createBindGroup({
+            layout: feedbackTextureBGL,
+            entries: [
+              { binding: 0, resource: renderTargets[srcIdx].createView() },
+              { binding: 1, resource: sampler },
+              { binding: 2, resource: rdTextures[rdSrcIdx].createView() }
+            ]
+          });
+          const rdCompPass = enc.beginRenderPass({
+            colorAttachments: [
+              {
+                view: renderTargets[dstIdx].createView(),
+                loadOp: 'clear',
+                storeOp: 'store',
+                clearValue: { r: 0, g: 0, b: 0, a: 1 }
+              }
+            ]
+          });
+          rdCompPass.setPipeline(rdCompositePipeline);
+          rdCompPass.setBindGroup(0, rdCompBG);
+          rdCompPass.setBindGroup(1, uniformBindGroup);
+          rdCompPass.setVertexBuffer(0, vertexBuffer);
+          rdCompPass.draw(6);
+          rdCompPass.end();
+          srcIdx = dstIdx;
+        } else {
+          const pipeline = effectPipelines.get(effect)!;
+          const bg =
+            shaderEffects[effect].stage === 'feedback'
+              ? historyBindGroups[srcIdx]
+              : rtBindGroups[srcIdx];
+          const effectPass = enc.beginRenderPass({
+            colorAttachments: [
+              {
+                view: renderTargets[dstIdx].createView(),
+                loadOp: 'clear',
+                storeOp: 'store',
+                clearValue: { r: 0, g: 0, b: 0, a: 1 }
+              }
+            ]
+          });
+          effectPass.setPipeline(pipeline);
+          effectPass.setBindGroup(0, bg);
+          effectPass.setBindGroup(1, uniformBindGroup);
+          effectPass.setVertexBuffer(0, vertexBuffer);
+          effectPass.draw(6);
+          effectPass.end();
+          srcIdx = dstIdx;
+        }
       }
 
       // Passthrough final RT → canvas
@@ -502,6 +614,46 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
 
       device.queue.submit([enc.finish()]);
 
+      // Every 90 frames, sample 64 pixels from the horizontal center strip of the
+      // final RT and report luma average + variance to onFrameQuality.
+      if (options.onFrameQuality && renderTargets && canvas && !qualityReadbackPending) {
+        qualityFrameCount++;
+        if (qualityFrameCount >= 90) {
+          qualityFrameCount = 0;
+          qualityReadbackPending = true;
+          const stripY = Math.floor(canvas.height / 2);
+          const stripX = Math.max(0, Math.floor(canvas.width / 2) - 32);
+          const copyEnc = device.createCommandEncoder();
+          copyEnc.copyTextureToBuffer(
+            { texture: renderTargets[srcIdx], origin: { x: stripX, y: stripY } },
+            { buffer: qualityReadbackBuffer, bytesPerRow: 256 },
+            { width: 64, height: 1 }
+          );
+          device.queue.submit([copyEnc.finish()]);
+          qualityReadbackBuffer
+            .mapAsync(GPUMapMode.READ)
+            .then(() => {
+              const data = new Uint8Array(qualityReadbackBuffer.getMappedRange(0, 256));
+              let lumaSum = 0;
+              for (let i = 0; i < 256; i += 4) {
+                lumaSum += (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+              }
+              const lumaAvg = lumaSum / 64;
+              let varSum = 0;
+              for (let i = 0; i < 256; i += 4) {
+                const luma = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+                varSum += (luma - lumaAvg) ** 2;
+              }
+              qualityReadbackBuffer.unmap();
+              qualityReadbackPending = false;
+              options.onFrameQuality!(lumaAvg, varSum / 64);
+            })
+            .catch(() => {
+              qualityReadbackPending = false;
+            });
+        }
+      }
+
       const frameEnd = performance.now();
       const frameTime = frameEnd - frameStart;
       perfData.frameTimes.push(frameStart);
@@ -523,6 +675,9 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
       renderTargets?.[0].destroy();
       renderTargets?.[1].destroy();
       historyTexture?.destroy();
+      rdTextures?.[0].destroy();
+      rdTextures?.[1].destroy();
+      qualityReadbackBuffer.destroy();
       vertexBuffer.destroy();
       uniformBuffer.destroy();
       device.destroy();

@@ -1,5 +1,10 @@
 <template>
-  <div class="main-view" @contextmenu.prevent="openControls">
+  <div
+    class="main-view"
+    :class="{ 'cursor-hidden': cursorHidden }"
+    @contextmenu.prevent="openControls"
+    @mousemove="onMouseMove"
+  >
     <div v-if="showSplash" id="splash">
       <svg id="splash-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
         <defs>
@@ -30,7 +35,7 @@
       </svg>
       <div id="splash-name">performer</div>
     </div>
-    <canvas ref="canvasRef" class="main-canvas" />
+    <canvas ref="canvasRef" class="main-canvas" @dblclick="toggleFullscreen" />
     <video ref="videoRef" class="hidden-video" crossorigin="anonymous" />
     <video ref="randomizeRef1" class="hidden-video" preload="auto" crossorigin="anonymous" />
     <video ref="randomizeRef2" class="hidden-video" preload="auto" crossorigin="anonymous" />
@@ -75,6 +80,7 @@ import { useVideoSource } from '@/components/input/useVideoSource';
 import { useMidi } from '@/composables/useMidi';
 import { useWebGPURenderer } from '@/composables/useWebGPURenderer';
 import { useRandomizeMode } from '@/composables/useRandomizeMode';
+import { useFrameQualityGuard } from '@/composables/useFrameQualityGuard';
 import { CHANNEL_NAME, type FromControls, type FromMain } from '@/broadcast';
 import packageJson from '../../package.json';
 
@@ -82,6 +88,13 @@ const VERSION = packageJson.version;
 const MIDI_NOTIFICATION_DURATION_MS = 5000;
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
+
+async function toggleFullscreen() {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  const win = getCurrentWindow();
+  const isFs = await win.isFullscreen();
+  await win.setFullscreen(!isFs);
+}
 const videoRef = ref<HTMLVideoElement | null>(null);
 const randomizeRef1 = ref<HTMLVideoElement | null>(null);
 const randomizeRef2 = ref<HTMLVideoElement | null>(null);
@@ -137,6 +150,11 @@ watch(
   }
 );
 
+const { scaledIntensities, onQualityData } = useFrameQualityGuard(
+  computed(() => effectTransitions.renderingEffects.value),
+  effectTransitions.renderingIntensities
+);
+
 function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
   fps.value = renderFps;
   frameTime.value = renderFrameTime;
@@ -146,11 +164,12 @@ useWebGPURenderer({
   canvasRef,
   videoRef: player.rendererVideoRef,
   activeEffects: effectTransitions.renderingEffects,
-  effectIntensities: effectTransitions.renderingIntensities,
+  effectIntensities: scaledIntensities,
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
   inputSource: settings.inputSource,
   bpm,
   onRenderPerformance: handleRenderPerformance,
+  onFrameQuality: onQualityData,
   onVideoNotRenderable: () => {
     showNotRenderableWarning.value = true;
   }
@@ -197,10 +216,11 @@ const appState = computed(() => ({
   inputSource: settings.inputSource.value,
   isMuted: settings.isMuted.value,
   isRandomizeActive: randomize.isActive.value,
+  randomizeBeat: randomize.beatProgress.value ? { ...randomize.beatProgress.value } : null,
   midiConnected: midi.connected.value,
   midiDeviceName: midi.deviceName.value,
   bpm: bpm.value,
-  showHelp: settings.showHelp.value,
+  isHelpVisible: settings.showHelp.value,
   videoPlaylist: toRaw(playlist.videoPlaylist.value).map((item) => ({ ...toRaw(item) })),
   selectedVideoIndex: playlist.selectedVideoIndex.value,
   loadedVideoIndex: player.loadedVideoIndex.value,
@@ -284,16 +304,31 @@ function onSpacebar(e: KeyboardEvent) {
   player.handleVideoPlayPause();
 }
 
+const cursorHidden = ref(false);
+let cursorHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onMouseMove() {
+  cursorHidden.value = false;
+  if (cursorHideTimer !== null) clearTimeout(cursorHideTimer);
+  cursorHideTimer = setTimeout(() => {
+    cursorHidden.value = true;
+  }, 2000);
+}
+
 onMounted(() => {
   showSplash.value = false;
   channel = new BroadcastChannel(CHANNEL_NAME);
   channel.onmessage = (e: MessageEvent<FromControls>) => handleAction(e.data);
   window.addEventListener('keydown', onSpacebar);
+  cursorHideTimer = setTimeout(() => {
+    cursorHidden.value = true;
+  }, 2000);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onSpacebar);
   channel?.close();
+  if (cursorHideTimer !== null) clearTimeout(cursorHideTimer);
 });
 
 watchEffect(() => {
@@ -327,6 +362,11 @@ async function openControls() {
   height: 100vh;
   background-color: black;
   overflow: hidden;
+}
+
+.cursor-hidden,
+.cursor-hidden * {
+  cursor: none !important;
 }
 
 .main-canvas {

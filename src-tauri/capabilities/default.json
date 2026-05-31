@@ -11,6 +11,8 @@
     "core:window:allow-get-all-windows",
     "core:window:allow-show",
     "core:window:allow-set-focus",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "dialog:allow-open",
     "store:default"
   ]

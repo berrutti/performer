@@ -19,12 +19,13 @@ export enum ShaderEffect {
   FEEDBACK_ECHO = 'FEEDBACK_ECHO',
   PALETTE_CYCLING = 'PALETTE_CYCLING',
   CONTOUR = 'CONTOUR',
-  AURORA = 'AURORA'
+  AURORA = 'AURORA',
+  REACTION_DIFFUSION = 'REACTION_DIFFUSION'
 }
 
 export interface ShaderEffectDef {
-  /** 'mapping' effects mutate uv, 'color' effects mutate color, 'feedback' effects read u_history */
-  stage: 'mapping' | 'color' | 'feedback';
+  /** 'mapping'/'color'/'feedback' are fragment pipeline stages; 'compute' uses GPU compute passes */
+  stage: 'mapping' | 'color' | 'feedback' | 'compute';
   intensity?: number;
   bpmSync?: boolean;
 }
@@ -43,5 +44,6 @@ export const shaderEffects: Record<ShaderEffect, ShaderEffectDef> = {
   [ShaderEffect.FEEDBACK_ECHO]: { stage: 'feedback', intensity: 1.0, bpmSync: true },
   [ShaderEffect.PALETTE_CYCLING]: { stage: 'color', intensity: 1.0, bpmSync: true },
   [ShaderEffect.CONTOUR]: { stage: 'feedback', intensity: 1.0, bpmSync: true },
-  [ShaderEffect.AURORA]: { stage: 'feedback', intensity: 1.0, bpmSync: true }
+  [ShaderEffect.AURORA]: { stage: 'feedback', intensity: 1.0, bpmSync: true },
+  [ShaderEffect.REACTION_DIFFUSION]: { stage: 'compute', intensity: 1.0, bpmSync: true }
 };

@@ -19,7 +19,8 @@ describe('useEffectTransitions', () => {
     [ShaderEffect.FEEDBACK_ECHO]: false,
     [ShaderEffect.PALETTE_CYCLING]: false,
     [ShaderEffect.CONTOUR]: false,
-    [ShaderEffect.AURORA]: false
+    [ShaderEffect.AURORA]: false,
+    [ShaderEffect.REACTION_DIFFUSION]: false
   };
 
   const initialIntensities: Record<ShaderEffect, number> = {
@@ -36,7 +37,8 @@ describe('useEffectTransitions', () => {
     [ShaderEffect.FEEDBACK_ECHO]: 1,
     [ShaderEffect.PALETTE_CYCLING]: 1,
     [ShaderEffect.CONTOUR]: 1,
-    [ShaderEffect.AURORA]: 1
+    [ShaderEffect.AURORA]: 1,
+    [ShaderEffect.REACTION_DIFFUSION]: 1
   };
 
   afterEach(() => {});
