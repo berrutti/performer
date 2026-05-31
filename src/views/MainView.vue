@@ -7,31 +7,10 @@
   >
     <div v-if="showSplash" id="splash">
       <svg id="splash-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-        <defs>
-          <radialGradient id="sgm" cx="36%" cy="28%" r="70%">
-            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
-            <stop offset="18%" stop-color="#ff55c0" stop-opacity="0.95" />
-            <stop offset="58%" stop-color="#cc0077" stop-opacity="0.85" />
-            <stop offset="100%" stop-color="#880055" stop-opacity="0" />
-          </radialGradient>
-          <radialGradient id="sgc" cx="36%" cy="28%" r="70%">
-            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
-            <stop offset="18%" stop-color="#00ddff" stop-opacity="0.95" />
-            <stop offset="58%" stop-color="#0099cc" stop-opacity="0.85" />
-            <stop offset="100%" stop-color="#005580" stop-opacity="0" />
-          </radialGradient>
-          <radialGradient id="sgy" cx="36%" cy="28%" r="70%">
-            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
-            <stop offset="18%" stop-color="#ffdd33" stop-opacity="0.95" />
-            <stop offset="58%" stop-color="#cc9900" stop-opacity="0.85" />
-            <stop offset="100%" stop-color="#886600" stop-opacity="0" />
-          </radialGradient>
-        </defs>
-        <g style="mix-blend-mode: screen">
-          <circle cx="512" cy="340" r="260" fill="url(#sgm)" />
-          <circle cx="318" cy="686" r="260" fill="url(#sgc)" />
-          <circle cx="706" cy="686" r="260" fill="url(#sgy)" />
-        </g>
+        <rect width="1024" height="1024" rx="224" ry="224" fill="white" />
+        <circle cx="512" cy="347" r="190" fill="#EE44A8" />
+        <circle cx="322" cy="676" r="190" fill="#22B8EE" />
+        <circle cx="702" cy="676" r="190" fill="#F5C820" />
       </svg>
       <div id="splash-name">performer</div>
     </div>
@@ -319,13 +298,12 @@ function onMouseMove() {
 }
 
 onMounted(() => {
-  showSplash.value = false;
   channel = new BroadcastChannel(CHANNEL_NAME);
   channel.onmessage = (e: MessageEvent<FromControls>) => handleAction(e.data);
   window.addEventListener('keydown', onSpacebar);
-  cursorHideTimer = setTimeout(() => {
-    cursorHidden.value = true;
-  }, 2000);
+  setTimeout(() => {
+    showSplash.value = false;
+  }, 800);
 });
 
 onUnmounted(() => {
