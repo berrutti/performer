@@ -6,11 +6,17 @@ declare const GPUBufferUsage: {
   UNIFORM: number;
   COPY_DST: number;
   COPY_SRC: number;
+  MAP_READ: number;
+};
+
+declare const GPUMapMode: {
+  READ: number;
 };
 
 declare const GPUTextureUsage: {
   TEXTURE_BINDING: number;
   RENDER_ATTACHMENT: number;
+  STORAGE_BINDING: number;
   COPY_SRC: number;
   COPY_DST: number;
 };

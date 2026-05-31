@@ -139,19 +139,28 @@
   font-family: var(--font);
   font-size: 22px;
   font-weight: 600;
-  width: 96px;
-  padding: 4px 8px;
+  width: 144px;
+  padding: 4px 10px;
   text-align: center;
   -moz-appearance: textfield;
 }
 
 .bpm-input::-webkit-inner-spin-button,
 .bpm-input::-webkit-outer-spin-button {
-  opacity: 0.4;
+  opacity: 0.6;
+  filter: invert(1);
 }
 
 .bpm-input:focus {
   border-color: var(--color-accent);
+}
+
+.beat-counter {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+  letter-spacing: 0.04em;
+  min-width: 52px;
 }
 
 /* Effects Grid */

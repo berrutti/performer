@@ -1,9 +1,9 @@
 import { ShaderEffect, shaderEffects } from '@/utils';
 
-// Uniform buffer layout — 32 × f32 = 128 bytes
+// Uniform buffer layout — 31 × f32 = 124 bytes
 // Indices: time=0, bpm=1, cropUMin=2, cropUMax=3, cropVMin=4, cropVMax=5,
-//   intensities at 6–16, bpmSync flags at 17–28, pad at 29–31
-export const UNIFORMS_FLOAT_COUNT = 32;
+//   intensities at 6–17, bpmSync flags at 18–30
+export const UNIFORMS_FLOAT_COUNT = 31;
 
 export const UNIFORM_IDX = {
   time: 0,
@@ -23,21 +23,23 @@ export const UNIFORM_IDX = {
     FEEDBACK_ECHO: 13,
     PALETTE_CYCLING: 14,
     CONTOUR: 15,
-    AURORA: 16
+    AURORA: 16,
+    REACTION_DIFFUSION: 17
   },
   bpmSync: {
-    REALITY_GLITCH: 17,
-    KALEIDOSCOPE: 18,
-    DISPLACE: 19,
-    SWIRL: 20,
-    CHROMA: 21,
-    PIXELATE: 22,
-    VORONOI: 23,
-    RIPPLE: 24,
-    FEEDBACK_ECHO: 25,
-    PALETTE_CYCLING: 26,
-    CONTOUR: 27,
-    AURORA: 28
+    REALITY_GLITCH: 18,
+    KALEIDOSCOPE: 19,
+    DISPLACE: 20,
+    SWIRL: 21,
+    CHROMA: 22,
+    PIXELATE: 23,
+    VORONOI: 24,
+    RIPPLE: 25,
+    FEEDBACK_ECHO: 26,
+    PALETTE_CYCLING: 27,
+    CONTOUR: 28,
+    AURORA: 29,
+    REACTION_DIFFUSION: 30
   }
 } as const;
 
@@ -50,12 +52,13 @@ struct Uniforms {
   intensity_PIXELATE: f32, intensity_VORONOI: f32,
   intensity_RIPPLE: f32, intensity_FEEDBACK_ECHO: f32,
   intensity_PALETTE_CYCLING: f32, intensity_CONTOUR: f32, intensity_AURORA: f32,
+  intensity_REACTION_DIFFUSION: f32,
   bpmSync_REALITY_GLITCH: f32, bpmSync_KALEIDOSCOPE: f32,
   bpmSync_DISPLACE: f32, bpmSync_SWIRL: f32, bpmSync_CHROMA: f32,
   bpmSync_PIXELATE: f32, bpmSync_VORONOI: f32, bpmSync_RIPPLE: f32,
   bpmSync_FEEDBACK_ECHO: f32, bpmSync_PALETTE_CYCLING: f32,
   bpmSync_CONTOUR: f32, bpmSync_AURORA: f32,
-  _pad0: f32, _pad1: f32, _pad2: f32,
+  bpmSync_REACTION_DIFFUSION: f32,
 }
 `;
 
@@ -298,7 +301,10 @@ const effectWGSL: Record<ShaderEffect, string> = {
     var hist = textureSample(u_history, u_sampler, clamp(uv + flow, vec2f(0.0), vec2f(1.0)));
     hist = vec4f(mix(hist.rgb, hist.brg, 0.018 * uniforms.intensity_AURORA), hist.a);
     color = vec4f(mix(color.rgb, hist.rgb, mix(0.70, 0.94, uniforms.intensity_AURORA)), color.a);
-  `
+  `,
+
+  // Compute-stage effects — no fragment WGSL snippet needed.
+  [ShaderEffect.REACTION_DIFFUSION]: ''
 };
 
 const effectTextureBindings = /* wgsl */ `
@@ -315,10 +321,11 @@ ${UNIFORMS_STRUCT}
 @group(1) @binding(0) var<uniform> uniforms: Uniforms;
 `;
 
-export function createEffectShaderWGSL(effect: ShaderEffect): string {
+export function createEffectShaderWGSL(effect: ShaderEffect): string | null {
   const def = shaderEffects[effect];
-  const hasFeedback = def.stage === 'feedback';
+  if (def.stage === 'compute') return null;
 
+  const hasFeedback = def.stage === 'feedback';
   const body = effectWGSL[effect];
 
   if (def.stage === 'mapping') {
@@ -347,3 +354,89 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
 }
   `;
 }
+
+// ── Shaders for REACTION_DIFFUSION ───────────────────────────────────────────
+
+// Fragment shader: one Gray-Scott step. Reads rd_state (R=A, G=B) + video frame for seeding.
+// Renders directly to an rgba8unorm ping-pong texture — no compute, no format issues.
+// Uses feedbackTextureBGL: binding 0 = rd_read, 1 = sampler, 2 = video_frame.
+export const rdStepShader = /* wgsl */ `
+${UNIFORMS_STRUCT}
+@group(0) @binding(0) var rd_state: texture_2d<f32>;
+@group(0) @binding(1) var u_sampler: sampler;
+@group(0) @binding(2) var video_frame: texture_2d<f32>;
+@group(1) @binding(0) var<uniform> uniforms: Uniforms;
+
+@fragment
+fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+  let dims = textureDimensions(rd_state);
+  let dx = 1.0 / f32(dims.x);
+  let dy = 1.0 / f32(dims.y);
+
+  let center = textureSample(rd_state, u_sampler, texCoord);
+  let left   = textureSample(rd_state, u_sampler, clamp(texCoord + vec2f(-dx, 0.0), vec2f(0.0), vec2f(1.0)));
+  let right  = textureSample(rd_state, u_sampler, clamp(texCoord + vec2f( dx, 0.0), vec2f(0.0), vec2f(1.0)));
+  let above  = textureSample(rd_state, u_sampler, clamp(texCoord + vec2f(0.0, -dy), vec2f(0.0), vec2f(1.0)));
+  let below  = textureSample(rd_state, u_sampler, clamp(texCoord + vec2f(0.0,  dy), vec2f(0.0), vec2f(1.0)));
+
+  let chemA = center.r;
+  let chemB = center.g;
+  let lapA = left.r + right.r + above.r + below.r - 4.0 * chemA;
+  let lapB = left.g + right.g + above.g + below.g - 4.0 * chemB;
+  let rxn = chemA * chemB * chemB;
+  var newA = clamp(chemA + 0.2097 * lapA - rxn + 0.055 * (1.0 - chemA), 0.0, 1.0);
+  var newB = clamp(chemB + 0.105  * lapB + rxn - 0.117 * chemB,         0.0, 1.0);
+
+  let videoColor = textureSample(video_frame, u_sampler, texCoord);
+  let luma = dot(videoColor.rgb, vec3f(0.299, 0.587, 0.114));
+  let intensity = uniforms.intensity_REACTION_DIFFUSION;
+  let beatPeriod = 60.0 / uniforms.bpm;
+  let beatPhase = (uniforms.time % beatPeriod) / beatPeriod;
+  let pulse = exp(-beatPhase * 6.0) * uniforms.bpmSync_REACTION_DIFFUSION;
+
+  // Stable background seeding — same pixels every frame, no shimmer.
+  let stableHash = fract(sin(texCoord.x * 13579.1 + texCoord.y * 37211.7) * 43758.5453);
+  if (luma > 0.35 && stableHash < intensity * intensity * 0.0015) {
+    newB = min(newB + 0.25, 1.0);
+    newA = max(newA - 0.15, 0.0);
+  }
+
+  // BPM burst seeding — time-varying hash fires only near the beat.
+  let burstHash = fract(sin(texCoord.x * 7919.1 + texCoord.y * 4211.7 + uniforms.time * 3.1) * 43758.5453);
+  if (luma > 0.30 && burstHash < pulse * 0.06) {
+    newB = min(newB + 0.5, 1.0);
+    newA = max(newA - 0.3, 0.0);
+  }
+
+  return vec4f(newA, newB, 0.0, 1.0);
+}
+`;
+
+// Fragment shader: composites the RD B-field as a coloured additive glow on the video.
+// Uses feedbackTextureBGL: binding 0 = current RT, 1 = sampler, 2 = rd_state.
+export const rdCompositeShader = /* wgsl */ `
+${UNIFORMS_STRUCT}
+@group(0) @binding(0) var u_image: texture_2d<f32>;
+@group(0) @binding(1) var u_sampler: sampler;
+@group(0) @binding(2) var u_rd: texture_2d<f32>;
+@group(1) @binding(0) var<uniform> uniforms: Uniforms;
+
+@fragment
+fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+  let color = textureSample(u_image, u_sampler, texCoord);
+  let rd = textureSample(u_rd, u_sampler, texCoord);
+  let chemB = rd.g;
+  let hue = chemB * 6.0 + uniforms.time * 0.2;
+  let rdCol = vec3f(
+    0.5 + 0.5 * cos(hue),
+    0.5 + 0.5 * cos(hue + 2.094),
+    0.5 + 0.5 * cos(hue + 4.189)
+  );
+  let beatPeriod = 60.0 / uniforms.bpm;
+  let beatPhase = (uniforms.time % beatPeriod) / beatPeriod;
+  let beatFlash = exp(-beatPhase * 7.0) * uniforms.bpmSync_REACTION_DIFFUSION;
+  let glowStrength = uniforms.intensity_REACTION_DIFFUSION * (1.8 + beatFlash * 2.0);
+  let glow = rdCol * chemB * glowStrength;
+  return vec4f(clamp(color.rgb + glow, vec3f(0.0), vec3f(1.0)), color.a);
+}
+`;

@@ -13,14 +13,15 @@ export interface AppState {
   duration: number;
   effectIntensities: Record<ShaderEffect, number>;
   inputSource: InputSource;
+  isHelpVisible: boolean;
   isMuted: boolean;
   isRandomizeActive: boolean;
   isVideoPlaying: boolean;
   loadedVideoIndex: number;
   midiConnected: boolean;
   midiDeviceName: string;
+  randomizeBeat: { beat: number; total: number } | null;
   selectedVideoIndex: number;
-  showHelp: boolean;
   videoPlaylist: VideoPlaylistItem[];
 }
 

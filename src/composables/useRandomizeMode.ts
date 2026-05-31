@@ -2,8 +2,8 @@ import { ref, onUnmounted, type Ref } from 'vue';
 import { ShaderEffect, shaderEffects } from '@/utils';
 import type { VideoPlaylistItem } from '@/components/input/useVideoPlaylist';
 
-const WAIT_BEATS = [8, 16, 32] as const;
-const KEEP_VIDEO_PROBABILITY = 0.35;
+const WAIT_BEATS = [16, 32] as const;
+const KEEP_VIDEO_PROBABILITY = 0.2;
 
 // Per-effect probability of appearing in a random snapshot.
 // Sum ~5.3 across 14 effects → ~4-5 active on average.
@@ -22,7 +22,8 @@ const EFFECT_WEIGHTS: Record<ShaderEffect, number> = {
   [ShaderEffect.FEEDBACK_ECHO]: 0.4,
   [ShaderEffect.PALETTE_CYCLING]: 0.15,
   [ShaderEffect.CONTOUR]: 0.45,
-  [ShaderEffect.AURORA]: 0.4
+  [ShaderEffect.AURORA]: 0.4,
+  [ShaderEffect.REACTION_DIFFUSION]: 0.2
 };
 
 export interface RandomizeSnapshot {
@@ -40,7 +41,11 @@ export function useRandomizeMode(
   onSchedule?: (snapshot: RandomizeSnapshot) => void
 ) {
   const isActive = ref(false);
+  const beatProgress = ref<{ beat: number; total: number } | null>(null);
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let progressIntervalId: ReturnType<typeof setInterval> | null = null;
+  let intervalStart = 0;
+  let intervalTotal = 0;
 
   function buildEffects(): {
     effects: Record<ShaderEffect, boolean>;
@@ -95,43 +100,70 @@ export function useRandomizeMode(
   function buildSnapshot(): RandomizeSnapshot {
     return {
       videoIndex: pickVideoIndex(),
-      // Avoid the very beginning and end of clips
       seekFraction: 0.05 + Math.random() * 0.85,
       ...buildEffects()
     };
   }
 
-  function scheduleNext() {
-    const beats = WAIT_BEATS[Math.floor(Math.random() * WAIT_BEATS.length)];
+  function updateBeatProgress() {
+    if (!isActive.value || intervalTotal === 0) {
+      beatProgress.value = null;
+      return;
+    }
     const beatMs = (60 / bpm.value) * 1000;
+    const elapsed = performance.now() - intervalStart;
+    const beat = Math.min(Math.floor(elapsed / beatMs) + 1, intervalTotal);
+    beatProgress.value = { beat, total: intervalTotal };
+  }
+
+  function scheduleNext(start: number) {
+    const total = WAIT_BEATS[Math.floor(Math.random() * WAIT_BEATS.length)];
+    const beatMs = (60 / bpm.value) * 1000;
+    const nextStart = start + total * beatMs;
+    const delay = Math.max(0, nextStart - performance.now());
+
+    intervalStart = start;
+    intervalTotal = total;
+
     const nextSnapshot = buildSnapshot();
     onSchedule?.(nextSnapshot);
 
     timeoutId = setTimeout(() => {
       if (!isActive.value) return;
       onApply(nextSnapshot);
-      scheduleNext();
-    }, beats * beatMs);
+      // If the timer fired more than 1.5 beats late (fullscreen transition, app suspend,
+      // etc.), re-anchor from now so subsequent switches resume correctly rather than
+      // cascading at zero delay trying to catch up.
+      const fireLate = performance.now() - nextStart;
+      scheduleNext(fireLate > beatMs * 1.5 ? performance.now() : nextStart);
+    }, delay);
   }
 
   function toggle() {
     if (isActive.value) {
       isActive.value = false;
+      beatProgress.value = null;
       if (timeoutId !== null) {
         clearTimeout(timeoutId);
         timeoutId = null;
+      }
+      if (progressIntervalId !== null) {
+        clearInterval(progressIntervalId);
+        progressIntervalId = null;
       }
     } else {
       isActive.value = true;
       const firstSnapshot = buildSnapshot();
       onApply(firstSnapshot);
-      scheduleNext();
+      scheduleNext(performance.now());
+      progressIntervalId = setInterval(updateBeatProgress, 80);
     }
   }
 
   onUnmounted(() => {
     if (timeoutId !== null) clearTimeout(timeoutId);
+    if (progressIntervalId !== null) clearInterval(progressIntervalId);
   });
 
-  return { isActive, toggle };
+  return { isActive, beatProgress, toggle };
 }
