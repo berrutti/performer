@@ -25,8 +25,7 @@ const PADS: Record<number, ShaderEffect> = {
 };
 
 const KNOB_CC_MAPPING: Record<number, ShaderEffect> = {
-  21: ShaderEffect.INVERT,
-  22: ShaderEffect.REALITY_GLITCH,
+  21: ShaderEffect.REALITY_GLITCH,
   23: ShaderEffect.DISPLACE,
   24: ShaderEffect.CHROMA,
   25: ShaderEffect.PIXELATE,

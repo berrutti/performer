@@ -1,9 +1,22 @@
 import { ShaderEffect, shaderEffects } from '@/utils';
 
-// Uniform buffer layout — 31 × f32 = 124 bytes
-// Indices: time=0, bpm=1, cropUMin=2, cropUMax=3, cropVMin=4, cropVMax=5,
-//   intensities at 6–17, bpmSync flags at 18–30
-export const UNIFORMS_FLOAT_COUNT = 31;
+// ── Uniform layout, derived from shaderEffects ────────────────────────────
+// Adding/removing intensity or bpmSync on any ShaderEffectDef automatically
+// updates the float count, all indices, and the WGSL struct — nothing to edit here.
+
+let _next = 6; // slots 0-5 are fixed (time, bpm, crop×4)
+
+const _intensityIdx: Partial<Record<ShaderEffect, number>> = {};
+for (const effect of Object.values(ShaderEffect)) {
+  if (shaderEffects[effect].intensity !== undefined) _intensityIdx[effect] = _next++;
+}
+
+const _bpmSyncIdx: Partial<Record<ShaderEffect, number>> = {};
+for (const effect of Object.values(ShaderEffect)) {
+  if (shaderEffects[effect].bpmSync) _bpmSyncIdx[effect] = _next++;
+}
+
+export const UNIFORMS_FLOAT_COUNT = _next;
 
 export const UNIFORM_IDX = {
   time: 0,
@@ -12,55 +25,24 @@ export const UNIFORM_IDX = {
   cropUMax: 3,
   cropVMin: 4,
   cropVMax: 5,
-  intensity: {
-    INVERT: 6,
-    REALITY_GLITCH: 7,
-    DISPLACE: 8,
-    CHROMA: 9,
-    PIXELATE: 10,
-    VORONOI: 11,
-    RIPPLE: 12,
-    FEEDBACK_ECHO: 13,
-    PALETTE_CYCLING: 14,
-    CONTOUR: 15,
-    AURORA: 16,
-    REACTION_DIFFUSION: 17
-  },
-  bpmSync: {
-    REALITY_GLITCH: 18,
-    KALEIDOSCOPE: 19,
-    DISPLACE: 20,
-    SWIRL: 21,
-    CHROMA: 22,
-    PIXELATE: 23,
-    VORONOI: 24,
-    RIPPLE: 25,
-    FEEDBACK_ECHO: 26,
-    PALETTE_CYCLING: 27,
-    CONTOUR: 28,
-    AURORA: 29,
-    REACTION_DIFFUSION: 30
-  }
-} as const;
+  intensity: _intensityIdx,
+  bpmSync: _bpmSyncIdx
+};
+
+const _intensityFields = Object.keys(_intensityIdx)
+  .map((e) => `  intensity_${e}: f32,`)
+  .join('\n');
+const _bpmSyncFields = Object.keys(_bpmSyncIdx)
+  .map((e) => `  bpmSync_${e}: f32,`)
+  .join('\n');
 
 const UNIFORMS_STRUCT = /* wgsl */ `
 struct Uniforms {
   time: f32, bpm: f32, cropUMin: f32, cropUMax: f32,
   cropVMin: f32, cropVMax: f32,
-  intensity_INVERT: f32, intensity_REALITY_GLITCH: f32,
-  intensity_DISPLACE: f32, intensity_CHROMA: f32,
-  intensity_PIXELATE: f32, intensity_VORONOI: f32,
-  intensity_RIPPLE: f32, intensity_FEEDBACK_ECHO: f32,
-  intensity_PALETTE_CYCLING: f32, intensity_CONTOUR: f32, intensity_AURORA: f32,
-  intensity_REACTION_DIFFUSION: f32,
-  bpmSync_REALITY_GLITCH: f32, bpmSync_KALEIDOSCOPE: f32,
-  bpmSync_DISPLACE: f32, bpmSync_SWIRL: f32, bpmSync_CHROMA: f32,
-  bpmSync_PIXELATE: f32, bpmSync_VORONOI: f32, bpmSync_RIPPLE: f32,
-  bpmSync_FEEDBACK_ECHO: f32, bpmSync_PALETTE_CYCLING: f32,
-  bpmSync_CONTOUR: f32, bpmSync_AURORA: f32,
-  bpmSync_REACTION_DIFFUSION: f32,
-}
-`;
+${_intensityFields}
+${_bpmSyncFields}
+}`;
 
 export const vertexShader = /* wgsl */ `
 struct VertexOutput {
@@ -105,7 +87,7 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
 // Per-effect WGSL logic snippets (inserted into the appropriate template).
 const effectWGSL: Record<ShaderEffect, string> = {
   [ShaderEffect.INVERT]: `
-    color = vec4f(mix(color.rgb, vec3f(1.0) - color.rgb, uniforms.intensity_INVERT), color.a);
+    color = vec4f(vec3f(1.0) - color.rgb, color.a);
   `,
 
   [ShaderEffect.GRAYSCALE]: `
@@ -271,9 +253,9 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let intensity = uniforms.intensity_CONTOUR;
     let beatPeriod = 60.0 / uniforms.bpm;
     let beatPhase = (uniforms.time % beatPeriod) / beatPeriod;
-    let beatPulse = exp(-beatPhase * 6.0) * uniforms.bpmSync_CONTOUR;
+    let beatPulse = exp(-beatPhase * 6.0) * uniforms.bpmSync_CONTOUR * intensity;
     let breathe = sin(uniforms.time * 0.4) * 0.15;
-    let bandFreq = mix(6.0, 32.0, intensity) * (1.0 + breathe) + beatPulse * 28.0;
+    let bandFreq = mix(6.0, 32.0, intensity) * (1.0 + breathe) + beatPulse * 14.0;
     let luma = dot(color.rgb, vec3f(0.299, 0.587, 0.114));
     let lineStrength = 1.0 - smoothstep(0.0, 0.18, abs(sin(luma * bandFreq * PI)));
     let hue = luma * 4.0 + (uniforms.time * uniforms.bpm) / 60.0 * uniforms.bpmSync_CONTOUR / 8.0;

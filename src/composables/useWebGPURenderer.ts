@@ -43,6 +43,8 @@ const QUAD_VERTICES = new Float32Array([
   -1, -1, 0, 1, 1, -1, 1, 1, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 1, 1, 1, 1, 1, 0
 ]);
 
+const FRAME_RING_SIZE = 128;
+
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
 function computeCrop(
@@ -212,40 +214,18 @@ function writeUniforms(
   timeSec: number
 ): void {
   const { bpm: bpmRef, effectIntensities, bpmSyncEnabled } = options;
-  const bpm = bpmRef.value;
   const intensities = effectIntensities.value;
   const sync = bpmSyncEnabled.value;
 
   data[UNIFORM_IDX.time] = timeSec;
-  data[UNIFORM_IDX.bpm] = bpm;
+  data[UNIFORM_IDX.bpm] = bpmRef.value;
 
-  data[UNIFORM_IDX.intensity.INVERT] = intensities[ShaderEffect.INVERT] ?? 1;
-  data[UNIFORM_IDX.intensity.REALITY_GLITCH] = intensities[ShaderEffect.REALITY_GLITCH] ?? 1;
-  data[UNIFORM_IDX.intensity.DISPLACE] = intensities[ShaderEffect.DISPLACE] ?? 1;
-  data[UNIFORM_IDX.intensity.CHROMA] = intensities[ShaderEffect.CHROMA] ?? 1;
-  data[UNIFORM_IDX.intensity.PIXELATE] = intensities[ShaderEffect.PIXELATE] ?? 1;
-  data[UNIFORM_IDX.intensity.VORONOI] = intensities[ShaderEffect.VORONOI] ?? 1;
-  data[UNIFORM_IDX.intensity.RIPPLE] = intensities[ShaderEffect.RIPPLE] ?? 1;
-  data[UNIFORM_IDX.intensity.FEEDBACK_ECHO] = intensities[ShaderEffect.FEEDBACK_ECHO] ?? 1;
-  data[UNIFORM_IDX.intensity.PALETTE_CYCLING] = intensities[ShaderEffect.PALETTE_CYCLING] ?? 1;
-  data[UNIFORM_IDX.intensity.CONTOUR] = intensities[ShaderEffect.CONTOUR] ?? 1;
-  data[UNIFORM_IDX.intensity.AURORA] = intensities[ShaderEffect.AURORA] ?? 1;
-  data[UNIFORM_IDX.intensity.REACTION_DIFFUSION] =
-    intensities[ShaderEffect.REACTION_DIFFUSION] ?? 1;
-
-  data[UNIFORM_IDX.bpmSync.REALITY_GLITCH] = sync[ShaderEffect.REALITY_GLITCH] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.KALEIDOSCOPE] = sync[ShaderEffect.KALEIDOSCOPE] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.DISPLACE] = sync[ShaderEffect.DISPLACE] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.SWIRL] = sync[ShaderEffect.SWIRL] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.CHROMA] = sync[ShaderEffect.CHROMA] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.PIXELATE] = sync[ShaderEffect.PIXELATE] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.VORONOI] = sync[ShaderEffect.VORONOI] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.RIPPLE] = sync[ShaderEffect.RIPPLE] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.FEEDBACK_ECHO] = sync[ShaderEffect.FEEDBACK_ECHO] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.PALETTE_CYCLING] = sync[ShaderEffect.PALETTE_CYCLING] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.CONTOUR] = sync[ShaderEffect.CONTOUR] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.AURORA] = sync[ShaderEffect.AURORA] ? 1 : 0;
-  data[UNIFORM_IDX.bpmSync.REACTION_DIFFUSION] = sync[ShaderEffect.REACTION_DIFFUSION] ? 1 : 0;
+  for (const effect of Object.values(ShaderEffect)) {
+    const iIdx = UNIFORM_IDX.intensity[effect];
+    if (iIdx !== undefined) data[iIdx] = intensities[effect] ?? 1;
+    const sIdx = UNIFORM_IDX.bpmSync[effect];
+    if (sIdx !== undefined) data[sIdx] = sync[effect] ? 1 : 0;
+  }
 }
 
 // Schedules a GPU→CPU readback of a 64-pixel strip from the center of the given texture.
@@ -307,12 +287,23 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
   const { uniformBindGroup, pipelines } = res;
 
   // ── Resize-dependent render targets ──────────────────────────────────────
+  //
+  // Three render targets rotate each frame: one holds the previous frame's
+  // final output (history), the other two ping-pong for the current frame's
+  // effect chain. histIdx tracks which RT is currently the history texture.
+  // This eliminates the per-frame copyTextureToTexture that the old
+  // 2-RT + separate history design required.
 
-  let renderTargets: [GPUTexture, GPUTexture] | null = null;
-  let historyTexture: GPUTexture | null = null;
-  let rtBindGroups: [GPUBindGroup, GPUBindGroup] | null = null;
-  let historyBindGroups: [GPUBindGroup, GPUBindGroup] | null = null;
+  let renderTargets: [GPUTexture, GPUTexture, GPUTexture] | null = null;
+  let rtBindGroups: [GPUBindGroup, GPUBindGroup, GPUBindGroup] | null = null;
+  // historyBindGroups[src][hist] — null when src === hist (invalid pair)
+  let historyBindGroups: (GPUBindGroup | null)[][] | null = null;
   let rdTextures: [GPUTexture, GPUTexture] | null = null;
+  // rdStepBGs[rdSrc][rtSrc] — precomputed for all ping-pong/history combinations
+  let rdStepBGs: GPUBindGroup[][] | null = null;
+  // rdCompBGs[rtSrc] — rdSrcIdx is always 0 after 4 iterations (even count)
+  let rdCompBGs: GPUBindGroup[] | null = null;
+  let histIdx = 2;
 
   function makeTexture(w: number, h: number, extraUsage = 0): GPUTexture {
     return device.createTexture({
@@ -350,10 +341,9 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
     if (renderTargets && !sizeChanged) return;
 
     renderTargets?.forEach((t) => t.destroy());
-    historyTexture?.destroy();
     rdTextures?.forEach((t) => t.destroy());
 
-    const [rt0, rt1, hist] = [
+    const [rt0, rt1, rt2] = [
       makeTexture(newW, newH),
       makeTexture(newW, newH),
       makeTexture(newW, newH)
@@ -371,44 +361,62 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
       })
     ];
 
-    renderTargets = [rt0, rt1];
-    historyTexture = hist;
+    renderTargets = [rt0, rt1, rt2];
     rdTextures = [rdA, rdB];
+    // RT[2] starts as history; RT[0] and RT[1] are the first frame's ping-pong pair.
+    histIdx = 2;
 
-    rtBindGroups = [
+    rtBindGroups = [rt0, rt1, rt2].map((rt) =>
       device.createBindGroup({
         layout: textureBGL,
         entries: [
-          { binding: 0, resource: rt0.createView() },
-          { binding: 1, resource: sampler }
-        ]
-      }),
-      device.createBindGroup({
-        layout: textureBGL,
-        entries: [
-          { binding: 0, resource: rt1.createView() },
+          { binding: 0, resource: rt.createView() },
           { binding: 1, resource: sampler }
         ]
       })
-    ];
-    historyBindGroups = [
+    ) as [GPUBindGroup, GPUBindGroup, GPUBindGroup];
+
+    historyBindGroups = [rt0, rt1, rt2].map((srcTex, src) =>
+      [rt0, rt1, rt2].map((histTex, hist) =>
+        src === hist
+          ? null
+          : device.createBindGroup({
+              layout: feedbackTextureBGL,
+              entries: [
+                { binding: 0, resource: srcTex.createView() },
+                { binding: 1, resource: sampler },
+                { binding: 2, resource: histTex.createView() }
+              ]
+            })
+      )
+    );
+
+    // Precompute RD step bind groups for all (rdSrc, rtSrc) pairs.
+    rdStepBGs = [rdA, rdB].map((rdTex) =>
+      [rt0, rt1, rt2].map((rtTex) =>
+        device.createBindGroup({
+          layout: feedbackTextureBGL,
+          entries: [
+            { binding: 0, resource: rdTex.createView() },
+            { binding: 1, resource: sampler },
+            { binding: 2, resource: rtTex.createView() }
+          ]
+        })
+      )
+    );
+
+    // Precompute RD composite bind groups for all rtSrc values.
+    // rdSrcIdx is always 0 after the 4-iteration step loop (even iteration count).
+    rdCompBGs = [rt0, rt1, rt2].map((rtTex) =>
       device.createBindGroup({
         layout: feedbackTextureBGL,
         entries: [
-          { binding: 0, resource: rt0.createView() },
+          { binding: 0, resource: rtTex.createView() },
           { binding: 1, resource: sampler },
-          { binding: 2, resource: hist.createView() }
-        ]
-      }),
-      device.createBindGroup({
-        layout: feedbackTextureBGL,
-        entries: [
-          { binding: 0, resource: rt1.createView() },
-          { binding: 1, resource: sampler },
-          { binding: 2, resource: hist.createView() }
+          { binding: 2, resource: rdA.createView() }
         ]
       })
-    ];
+    );
 
     const initEnc = device.createCommandEncoder();
     for (const rdTex of [rdA, rdB]) {
@@ -440,7 +448,11 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
 
   // ── Render loop ───────────────────────────────────────────────────────────
 
-  const perfData = { frameTimes: [] as number[], lastReport: 0 };
+  const perfData = {
+    frameRing: new Float64Array(FRAME_RING_SIZE),
+    frameHead: 0,
+    lastReport: 0
+  };
   let lastVideo: HTMLVideoElement | null = null;
   let videoWasReady = false;
   let notifiedNotRenderable = false;
@@ -503,7 +515,7 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
       notifiedNotRenderable = false;
     }
 
-    if (!renderTargets || !rtBindGroups || !historyBindGroups || !historyTexture) {
+    if (!renderTargets || !rtBindGroups || !historyBindGroups) {
       rafId = requestAnimationFrame(renderFrame);
       return;
     }
@@ -521,10 +533,15 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
     const activeList = Object.values(ShaderEffect).filter((e) => options.activeEffects.value[e]);
-    const anyFeedback = activeList.some((e) => shaderEffects[e].stage === 'feedback');
     const enc = device.createCommandEncoder();
 
-    // Blit video → RT[0]
+    // Determine which two render targets ping-pong this frame.
+    // histIdx is the RT holding last frame's output; the other two are the active pair.
+    const pingPong = [0, 1, 2].filter((i) => i !== histIdx);
+    const ppA = pingPong[0];
+    const ppB = pingPong[1];
+
+    // Blit video → renderTargets[ppA]
     {
       const blitBG = device.createBindGroup({
         layout: externalTextureBGL,
@@ -536,7 +553,7 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
       const blitPass = enc.beginRenderPass({
         colorAttachments: [
           {
-            view: renderTargets[0].createView(),
+            view: renderTargets[ppA].createView(),
             loadOp: 'clear',
             storeOp: 'store',
             clearValue: { r: 0, g: 0, b: 0, a: 1 }
@@ -551,24 +568,17 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
       blitPass.end();
     }
 
-    // Effect passes — ping-pong RT[0] ↔ RT[1]
-    let srcIdx = 0;
+    // Effect passes — ping-pong between ppA and ppB
+    let srcIdx = ppA;
     let rdSrcIdx = 0;
 
     for (const effect of activeList) {
-      const dstIdx = (1 - srcIdx) as 0 | 1;
+      const dstIdx = srcIdx === ppA ? ppB : ppA;
 
       if (effect === ShaderEffect.REACTION_DIFFUSION && rdTextures) {
         for (let iter = 0; iter < 4; iter++) {
           const rdDst = (1 - rdSrcIdx) as 0 | 1;
-          const stepBG = device.createBindGroup({
-            layout: feedbackTextureBGL,
-            entries: [
-              { binding: 0, resource: rdTextures[rdSrcIdx].createView() },
-              { binding: 1, resource: sampler },
-              { binding: 2, resource: renderTargets[srcIdx].createView() }
-            ]
-          });
+          const stepBG = rdStepBGs![rdSrcIdx][srcIdx];
           const stepPass = enc.beginRenderPass({
             colorAttachments: [
               { view: rdTextures[rdDst].createView(), loadOp: 'load', storeOp: 'store' }
@@ -582,14 +592,7 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
           stepPass.end();
           rdSrcIdx = rdDst;
         }
-        const rdCompBG = device.createBindGroup({
-          layout: feedbackTextureBGL,
-          entries: [
-            { binding: 0, resource: renderTargets[srcIdx].createView() },
-            { binding: 1, resource: sampler },
-            { binding: 2, resource: rdTextures[rdSrcIdx].createView() }
-          ]
-        });
+        const rdCompBG = rdCompBGs![srcIdx];
         const rdCompPass = enc.beginRenderPass({
           colorAttachments: [
             {
@@ -611,8 +614,8 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
         const pipeline = pipelines.effects.get(effect)!;
         const bg =
           shaderEffects[effect].stage === 'feedback'
-            ? historyBindGroups[srcIdx]
-            : rtBindGroups[srcIdx];
+            ? historyBindGroups![srcIdx][histIdx]!
+            : rtBindGroups![srcIdx];
         const effectPass = enc.beginRenderPass({
           colorAttachments: [
             {
@@ -645,21 +648,16 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
       ]
     });
     finalPass.setPipeline(pipelines.passthrough);
-    finalPass.setBindGroup(0, rtBindGroups[srcIdx]);
+    finalPass.setBindGroup(0, rtBindGroups![srcIdx]);
     finalPass.setBindGroup(1, uniformBindGroup);
     finalPass.setVertexBuffer(0, vertexBuffer);
     finalPass.draw(6);
     finalPass.end();
 
-    if (anyFeedback) {
-      enc.copyTextureToTexture(
-        { texture: renderTargets[srcIdx] },
-        { texture: historyTexture },
-        { width: canvas?.width ?? 1, height: canvas?.height ?? 1 }
-      );
-    }
-
     device.queue.submit([enc.finish()]);
+
+    // Rotate history: the RT that just received the final output becomes next frame's history.
+    histIdx = srcIdx;
 
     if (options.onFrameQuality && renderTargets && canvas && !qualityReadbackPending) {
       if (++qualityFrameCount >= 30) {
@@ -681,10 +679,15 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
 
     const frameEnd = performance.now();
     const frameTime = frameEnd - frameStart;
-    perfData.frameTimes.push(frameStart);
-    perfData.frameTimes = perfData.frameTimes.filter((t) => t > frameStart - 1000);
+    perfData.frameRing[perfData.frameHead & (FRAME_RING_SIZE - 1)] = frameStart;
+    perfData.frameHead++;
     if (frameStart - perfData.lastReport > 200 && options.onRenderPerformance) {
-      options.onRenderPerformance(perfData.frameTimes.length, frameTime);
+      const cutoff = frameStart - 1000;
+      let fps = 0;
+      for (let i = 0; i < FRAME_RING_SIZE; i++) {
+        if (perfData.frameRing[i] > cutoff) fps++;
+      }
+      options.onRenderPerformance(fps, frameTime);
       perfData.lastReport = frameStart;
     }
 
@@ -698,7 +701,6 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
     cancelAnimationFrame(rafId);
     window.removeEventListener('resize', updateTargets);
     renderTargets?.forEach((t) => t.destroy());
-    historyTexture?.destroy();
     rdTextures?.forEach((t) => t.destroy());
     qualityReadbackBuffer.destroy();
     vertexBuffer.destroy();
