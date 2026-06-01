@@ -18,7 +18,7 @@ Get the latest release for macOS or Windows from the [Releases](https://github.c
 The app is not code-signed, so macOS will block it on first launch. To fix this, after you drag and dropped the app to `Applications`, run once in Terminal:
 
 ```bash
-xattr -cr /Applications/Beatmatcher.app
+xattr -cr /Applications/Performer.app
 ```
 
 Then the app should open without problems.
