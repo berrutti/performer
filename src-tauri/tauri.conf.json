@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "performer",
+  "productName": "Performer",
   "version": "2.3.0",
   "identifier": "com.berrutti.performer",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "performer",
+        "title": "Performer",
         "width": 1280,
         "height": 720,
         "resizable": true,

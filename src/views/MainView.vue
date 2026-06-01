@@ -12,7 +12,7 @@
         <circle cx="322" cy="676" r="190" fill="#22B8EE" />
         <circle cx="702" cy="676" r="190" fill="#F5C820" />
       </svg>
-      <div id="splash-name">performer</div>
+      <div id="splash-name">Performer</div>
     </div>
     <canvas ref="canvasRef" class="main-canvas" @dblclick="toggleFullscreen" />
     <video ref="videoRef" class="hidden-video" crossorigin="anonymous" />
@@ -328,7 +328,7 @@ async function openControls() {
   }
   new WebviewWindow('controls', {
     url: window.location.href.split('#')[0] + '#controls',
-    title: 'performer',
+    title: 'Performer',
     width: 900,
     height: 700,
     resizable: true

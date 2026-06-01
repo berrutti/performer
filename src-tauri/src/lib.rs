@@ -9,11 +9,11 @@ pub fn run() {
         .setup(|app| {
             let icon = app.default_window_icon().cloned();
             let about = AboutMetadataBuilder::new()
-                .name(Some("performer"))
+                .name(Some("Performer"))
                 .copyright(Some("Copyright 2026 Matias Berrutti\ngithub.com/berrutti/performer"))
                 .icon(icon)
                 .build();
-            let app_menu = SubmenuBuilder::new(app, "performer")
+            let app_menu = SubmenuBuilder::new(app, "Performer")
                 .item(&PredefinedMenuItem::about(app, None, Some(about))?)
                 .separator()
                 .item(&PredefinedMenuItem::hide(app, None)?)
