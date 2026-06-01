@@ -1,8 +1,8 @@
-# performer
+# Performer
 
 Perform with live video or VODs and apply effects to them.
 
-![performer screenshot](assets/screenshot.png)
+![Performer screenshot](assets/screenshot.png)
 
 Right-click the canvas to open the controls in a separate tab. Use a webcam or load your own video files.
 
@@ -40,7 +40,7 @@ Built with Tauri + Vue 3 + TypeScript + Vite.
 
 ## License
 
-performer - A desktop app to perform with live video or VODs and effects.  
+Performer - A desktop app to perform with live video or VODs and effects.  
 Copyright (C) 2026 Matias Berrutti
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
