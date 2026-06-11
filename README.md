@@ -38,6 +38,8 @@ yarn dev
 
 Built with Tauri + Vue 3 + TypeScript + Vite.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for an overview of how the app is structured.
+
 ## License
 
 Performer - A desktop app to perform with live video or VODs and effects.  
