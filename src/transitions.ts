@@ -1,46 +1,34 @@
-import { ShaderEffect, shaderEffects } from './utils';
+import { ShaderEffect, shaderEffects, buildEffectRecord } from './utils';
 
-export const TRANSITION_DURATION = 100; // milliseconds
-
-export type TransitionState = 'idle' | 'transitioning-in' | 'transitioning-out';
+export const TRANSITION_DURATION_MS = 100;
 
 export interface EffectTransition {
-  state: TransitionState;
-  currentIntensity: number; // What we actually render with (0-1)
-  targetIntensity: number; // What user set (0-1)
-  startIntensity: number; // Intensity when transition started
-  progress: number; // 0-1 animation progress
-  startTime: number; // When transition started
-  isActive: boolean; // True if effect should be rendered (currentIntensity > 0)
+  animating: boolean;
+  currentIntensity: number;
+  targetIntensity: number;
+  startIntensity: number;
+  startTime: number;
+  /** True while the effect must be rendered, including during a fade-out. */
+  isActive: boolean;
 }
 
 export type EffectTransitions = Record<ShaderEffect, EffectTransition>;
 
-// Smooth easing function for natural animation feel
 export function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-// Initialize transition state for all effects
 export function createInitialTransitions(): EffectTransitions {
-  const transitions: Partial<EffectTransitions> = {};
-
-  Object.values(ShaderEffect).forEach((effect) => {
-    transitions[effect] = {
-      state: 'idle',
-      currentIntensity: 0,
-      targetIntensity: 0,
-      startIntensity: 0,
-      progress: 0,
-      startTime: 0,
-      isActive: false
-    };
-  });
-
-  return transitions as EffectTransitions;
+  return buildEffectRecord(() => ({
+    animating: false,
+    currentIntensity: 0,
+    targetIntensity: 0,
+    startIntensity: 0,
+    startTime: 0,
+    isActive: false
+  }));
 }
 
-// Start a transition for an effect
 export function startTransition(
   transitions: EffectTransitions,
   effect: ShaderEffect,
@@ -48,91 +36,65 @@ export function startTransition(
   now: number
 ): EffectTransitions {
   const current = transitions[effect];
-  const newTransitions = { ...transitions };
 
-  // Only create smooth transitions for effects that have intensity controls
-  const hasIntensityControl = shaderEffects[effect].intensity !== undefined;
-
-  if (hasIntensityControl) {
-    // Smooth transition for intensity-controlled effects
-    newTransitions[effect] = {
-      ...current,
-      state: targetIntensity > 0 ? 'transitioning-in' : 'transitioning-out',
-      targetIntensity,
-      startIntensity: current.currentIntensity, // Remember where we started
-      startTime: now,
-      progress: 0,
-      isActive: true // Keep active during transition
-    };
-  } else {
-    // Immediate toggle for non-intensity effects (like GRAYSCALE, KALEIDOSCOPE)
-    newTransitions[effect] = {
-      ...current,
-      state: 'idle',
-      currentIntensity: targetIntensity,
-      targetIntensity,
-      startIntensity: targetIntensity,
-      progress: 1,
-      startTime: now,
-      isActive: targetIntensity > 0
+  // Effects without an intensity uniform can't render at partial strength,
+  // so they switch hard instead of fading.
+  if (shaderEffects[effect].intensity === undefined) {
+    return {
+      ...transitions,
+      [effect]: {
+        ...current,
+        animating: false,
+        currentIntensity: targetIntensity,
+        targetIntensity,
+        startIntensity: targetIntensity,
+        startTime: now,
+        isActive: targetIntensity > 0
+      }
     };
   }
 
-  return newTransitions;
+  return {
+    ...transitions,
+    [effect]: {
+      ...current,
+      animating: true,
+      targetIntensity,
+      startIntensity: current.currentIntensity,
+      startTime: now,
+      isActive: true
+    }
+  };
 }
 
-// Update all transitions based on current time
 export function updateTransitions(transitions: EffectTransitions, now: number): EffectTransitions {
-  const newTransitions = { ...transitions };
-  let hasChanges = false;
+  let changed = false;
+  const next = { ...transitions };
 
-  Object.entries(newTransitions).forEach(([effectKey, transition]) => {
-    const effect = effectKey as ShaderEffect;
+  for (const effect of Object.values(ShaderEffect)) {
+    const transition = next[effect];
+    if (!transition.animating) continue;
 
-    if (transition.state === 'idle') return;
+    const progress = Math.min((now - transition.startTime) / TRANSITION_DURATION_MS, 1);
+    const eased = easeInOutCubic(progress);
+    const currentIntensity =
+      transition.startIntensity + eased * (transition.targetIntensity - transition.startIntensity);
 
-    const elapsed = now - transition.startTime;
-    const rawProgress = Math.min(elapsed / TRANSITION_DURATION, 1);
-    const easedProgress = easeInOutCubic(rawProgress);
+    next[effect] =
+      progress >= 1
+        ? {
+            ...transition,
+            animating: false,
+            currentIntensity: transition.targetIntensity,
+            isActive: transition.targetIntensity > 0
+          }
+        : { ...transition, currentIntensity };
+    changed = true;
+  }
 
-    let newIntensity: number;
-
-    if (transition.state === 'transitioning-in') {
-      // Fade in: interpolate from startIntensity to targetIntensity
-      newIntensity =
-        transition.startIntensity +
-        easedProgress * (transition.targetIntensity - transition.startIntensity);
-    } else {
-      // transitioning-out
-      // Fade out: interpolate from startIntensity to targetIntensity (which is 0)
-      newIntensity =
-        transition.startIntensity +
-        easedProgress * (transition.targetIntensity - transition.startIntensity);
-    }
-
-    newTransitions[effect] = {
-      ...transition,
-      currentIntensity: newIntensity,
-      progress: rawProgress
-    };
-
-    // Complete transition
-    if (rawProgress >= 1) {
-      newTransitions[effect] = {
-        ...newTransitions[effect],
-        state: 'idle',
-        currentIntensity: transition.targetIntensity,
-        isActive: transition.targetIntensity > 0
-      };
-    }
-
-    hasChanges = true;
-  });
-
-  return hasChanges ? newTransitions : transitions;
+  return changed ? next : transitions;
 }
 
-// Check if any transitions are active (for animation loop)
 export function hasActiveTransitions(transitions: EffectTransitions): boolean {
-  return Object.values(transitions).some((t) => t.state !== 'idle');
+  return Object.values(transitions).some((t) => t.animating);
 }

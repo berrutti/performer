@@ -1,6 +1,5 @@
 import { onMounted, onUnmounted, watch, type Ref, type ComputedRef } from 'vue';
 import { ShaderEffect, shaderEffects } from '@/utils';
-import type { InputSource } from '@/broadcast';
 import {
   vertexShader,
   blitShader,
@@ -18,11 +17,11 @@ export interface UseWebGPURendererOptions {
   activeEffects: ComputedRef<Record<ShaderEffect, boolean>>;
   effectIntensities: ComputedRef<Record<ShaderEffect, number>>;
   bpmSyncEnabled: ComputedRef<Record<ShaderEffect, boolean>>;
-  inputSource: Ref<InputSource>;
   bpm: Ref<number>;
   onRenderPerformance?: (fps: number, frameTime: number) => void;
   onVideoNotRenderable?: () => void;
   onFrameQuality?: (lumaAvg: number, variance: number) => void;
+  onRendererUnavailable?: () => void;
 }
 
 // ── Vue composable ─────────────────────────────────────────────────────────
@@ -47,7 +46,7 @@ const FRAME_RING_SIZE = 128;
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
-function computeCrop(
+export function computeCrop(
   videoWidth: number,
   videoHeight: number,
   canvasWidth: number,
@@ -278,7 +277,10 @@ async function initRenderer(options: UseWebGPURendererOptions): Promise<(() => v
   if (!canvas) return;
 
   const gpu = await acquireGPUContext(canvas);
-  if (!gpu) return;
+  if (!gpu) {
+    options.onRendererUnavailable?.();
+    return;
+  }
   const { device, context, canvasFormat } = gpu;
 
   const res = createGPUResources(device, canvasFormat);

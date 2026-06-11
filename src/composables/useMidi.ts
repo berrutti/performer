@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue';
-import { WebMidi, type Input } from 'webmidi';
+import { WebMidi, type Input, type PortEvent } from 'webmidi';
 import { ShaderEffect } from '@/utils';
 
 export interface MidiConfig {
@@ -72,29 +72,50 @@ export function useMidi(config: MidiConfig) {
     });
   }
 
+  function findLaunchkey(): Input | undefined {
+    return (
+      WebMidi.getInputByName('Launchkey Mini MK3') ||
+      WebMidi.getInputByName('Launchkey Mini') ||
+      WebMidi.inputs.find((i) => i.name.toLowerCase().includes('launchkey'))
+    );
+  }
+
+  function tryConnect() {
+    if (inputRef) return;
+    const input = findLaunchkey();
+    if (!input) return;
+
+    inputRef = input;
+    setupListeners();
+    connected.value = true;
+    deviceName.value = input.name;
+    config.onMidiConnect?.();
+  }
+
+  function onPortDisconnected(e: PortEvent) {
+    const port = e.port as { id?: string };
+    if (!inputRef || port.id !== inputRef.id) return;
+    inputRef.removeListener();
+    inputRef = null;
+    connected.value = false;
+    deviceName.value = '';
+  }
+
   async function initialize() {
     try {
       await WebMidi.enable();
-
-      const launchkeyInput =
-        WebMidi.getInputByName('Launchkey Mini MK3') ||
-        WebMidi.getInputByName('Launchkey Mini') ||
-        WebMidi.inputs.find((i) => i.name.toLowerCase().includes('launchkey'));
-
-      if (!launchkeyInput) throw new Error('Launchkey Mini not found');
-
-      inputRef = launchkeyInput;
-      setupListeners();
-
-      connected.value = true;
-      deviceName.value = launchkeyInput.name;
-      config.onMidiConnect?.();
     } catch {
-      connected.value = false;
+      return;
     }
+    // Keep watching ports so the controller can be plugged in (or reconnected) mid-session.
+    WebMidi.addListener('connected', tryConnect);
+    WebMidi.addListener('disconnected', onPortDisconnected);
+    tryConnect();
   }
 
-  function disconnect() {
+  function teardown() {
+    WebMidi.removeListener('connected', tryConnect);
+    WebMidi.removeListener('disconnected', onPortDisconnected);
     if (inputRef) {
       inputRef.removeListener();
       inputRef = null;
@@ -104,7 +125,7 @@ export function useMidi(config: MidiConfig) {
   }
 
   onMounted(() => initialize());
-  onUnmounted(() => disconnect());
+  onUnmounted(() => teardown());
 
   return { connected, deviceName };
 }

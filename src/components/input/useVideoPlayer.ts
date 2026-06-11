@@ -9,15 +9,26 @@ export interface VideoSnapshot {
   seekFraction: number;
 }
 
-export function useVideoPlayer(
-  videoRef: Ref<HTMLVideoElement | null>,
-  randomizeRef1: Ref<HTMLVideoElement | null>,
-  randomizeRef2: Ref<HTMLVideoElement | null>,
-  videoPlaylist: Ref<VideoPlaylistItem[]>,
-  selectedVideoIndex: Ref<number>,
-  inputSource: Ref<InputSource>,
-  isMuted: Ref<boolean>
-) {
+export interface UseVideoPlayerOptions {
+  videoRef: Ref<HTMLVideoElement | null>;
+  randomizeRef1: Ref<HTMLVideoElement | null>;
+  randomizeRef2: Ref<HTMLVideoElement | null>;
+  videoPlaylist: Ref<VideoPlaylistItem[]>;
+  selectedVideoIndex: Ref<number>;
+  inputSource: Ref<InputSource>;
+  isMuted: Ref<boolean>;
+}
+
+export function useVideoPlayer(options: UseVideoPlayerOptions) {
+  const {
+    videoRef,
+    randomizeRef1,
+    randomizeRef2,
+    videoPlaylist,
+    selectedVideoIndex,
+    inputSource,
+    isMuted
+  } = options;
   const loadedVideoIndex = ref(0);
   const isVideoPlaying = ref(false);
   const videoPausedManually = ref(false);
@@ -109,12 +120,13 @@ export function useVideoPlayer(
     }
   }
 
-  async function handleNextVideo() {
-    if (videoPlaylist.value.length <= 1) return;
+  async function stepVideo(direction: 1 | -1) {
+    const count = videoPlaylist.value.length;
+    if (count <= 1) return;
     const videoActive = isVideoPlaying.value || videoPausedManually.value;
     if (videoActive) {
       const wasPlaying = isVideoPlaying.value;
-      const nextIndex = (loadedVideoIndex.value + 1) % videoPlaylist.value.length;
+      const nextIndex = (loadedVideoIndex.value + direction + count) % count;
       loadedVideoIndex.value = nextIndex;
       selectedVideoIndex.value = nextIndex;
       const video = videoRef.value;
@@ -127,34 +139,16 @@ export function useVideoPlayer(
       await waitForCanPlay(video);
       if (wasPlaying) await startPlayback(video);
     } else {
-      selectedVideoIndex.value = (selectedVideoIndex.value + 1) % videoPlaylist.value.length;
+      selectedVideoIndex.value = (selectedVideoIndex.value + direction + count) % count;
     }
   }
 
-  async function handlePreviousVideo() {
-    if (videoPlaylist.value.length <= 1) return;
-    const videoActive = isVideoPlaying.value || videoPausedManually.value;
-    if (videoActive) {
-      const wasPlaying = isVideoPlaying.value;
-      const prevIndex =
-        loadedVideoIndex.value === 0 ? videoPlaylist.value.length - 1 : loadedVideoIndex.value - 1;
-      loadedVideoIndex.value = prevIndex;
-      selectedVideoIndex.value = prevIndex;
-      const video = videoRef.value;
-      const item = videoPlaylist.value[prevIndex];
-      if (!video || !item) return;
-      if (video.src !== item.src) {
-        video.src = item.src;
-        video.load();
-      }
-      await waitForCanPlay(video);
-      if (wasPlaying) await startPlayback(video);
-    } else {
-      selectedVideoIndex.value =
-        selectedVideoIndex.value === 0
-          ? videoPlaylist.value.length - 1
-          : selectedVideoIndex.value - 1;
-    }
+  function handleNextVideo() {
+    return stepVideo(1);
+  }
+
+  function handlePreviousVideo() {
+    return stepVideo(-1);
   }
 
   function handleVideoRemoved({ wasLoaded, newLoadedIndex }: RemoveVideoResult) {

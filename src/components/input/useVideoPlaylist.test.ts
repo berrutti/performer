@@ -102,6 +102,39 @@ describe('useVideoPlaylist', () => {
     cleanup();
   });
 
+  it('shifts loaded and selected indices down when an earlier video is removed', async () => {
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4', '/c.mp4']);
+    await nextTick();
+    result.selectedVideoIndex.value = 2;
+
+    const id = result.videoPlaylist.value[0].id;
+    const { wasLoaded, newLoadedIndex } = result.removeVideoFromList(id, 2);
+
+    expect(wasLoaded).toBe(false);
+    expect(newLoadedIndex).toBe(1);
+    expect(result.selectedVideoIndex.value).toBe(1);
+    expect(result.videoPlaylist.value[1].name).toBe('c.mp4');
+    cleanup();
+  });
+
+  it('keeps indices unchanged when a later video is removed', async () => {
+    const [result, cleanup] = withSetup(() => useVideoPlaylist(inputSourceRef));
+
+    result.handleAddVideosToPlaylist(['/a.mp4', '/b.mp4', '/c.mp4']);
+    await nextTick();
+    result.selectedVideoIndex.value = 1;
+
+    const id = result.videoPlaylist.value[2].id;
+    const { wasLoaded, newLoadedIndex } = result.removeVideoFromList(id, 1);
+
+    expect(wasLoaded).toBe(false);
+    expect(newLoadedIndex).toBe(1);
+    expect(result.selectedVideoIndex.value).toBe(1);
+    cleanup();
+  });
+
   it('removeVideoFromList returns wasLoaded=false when a different video is removed', async () => {
     const [result, cleanup] = withSetup(() => useVideoPlaylist(inputSourceRef));
 
