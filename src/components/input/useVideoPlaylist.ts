@@ -56,21 +56,30 @@ export function useVideoPlaylist(inputSource: Ref<InputSource>) {
   // loaded index should be, so the caller (useVideoPlayer) can stop the DOM.
   function removeVideoFromList(videoId: string, currentLoadedIndex: number): RemoveVideoResult {
     const removedIndex = videoPlaylist.value.findIndex((v) => v.id === videoId);
+    if (removedIndex === -1) {
+      return { wasLoaded: false, newLoadedIndex: currentLoadedIndex };
+    }
+
     const newPlaylist = videoPlaylist.value.filter((v) => v.id !== videoId);
 
-    if (selectedVideoIndex.value >= newPlaylist.length) {
+    // Indices pointing past the removed item shift down by one; without this the
+    // selected/loaded highlights drift onto the wrong row after a removal.
+    if (removedIndex < selectedVideoIndex.value) {
+      selectedVideoIndex.value -= 1;
+    } else if (selectedVideoIndex.value >= newPlaylist.length) {
       selectedVideoIndex.value = Math.max(0, newPlaylist.length - 1);
     }
 
     videoPlaylist.value = newPlaylist;
 
-    return {
-      wasLoaded: removedIndex === currentLoadedIndex,
-      newLoadedIndex:
-        currentLoadedIndex >= newPlaylist.length
-          ? Math.max(0, newPlaylist.length - 1)
-          : currentLoadedIndex
-    };
+    let newLoadedIndex = currentLoadedIndex;
+    if (removedIndex < currentLoadedIndex) {
+      newLoadedIndex -= 1;
+    } else if (newLoadedIndex >= newPlaylist.length) {
+      newLoadedIndex = Math.max(0, newPlaylist.length - 1);
+    }
+
+    return { wasLoaded: removedIndex === currentLoadedIndex, newLoadedIndex };
   }
 
   return {

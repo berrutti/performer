@@ -23,6 +23,10 @@
       video format not supported by renderer
     </div>
 
+    <div v-if="showRendererUnavailable" class="canvas-overlay canvas-overlay--warn">
+      WebGPU is not available, rendering is disabled
+    </div>
+
     <div v-if="showNoVideoMessage" class="canvas-overlay canvas-overlay--hint">
       {{
         playlist.videoPlaylist.value.length === 0
@@ -83,6 +87,11 @@ const frameTime = ref(0);
 const showMidiSyncNotification = ref(false);
 const showSplash = ref(true);
 const showNotRenderableWarning = ref(false);
+const showRendererUnavailable = ref(false);
+
+// Set once the user has ever started playback — suppresses the hint permanently
+// so a brief not-playing state during video transitions doesn't flash the message.
+const videoEverStarted = ref(false);
 
 const initialActiveEffects = buildEffectRecord(() => false);
 const initialIntensities = buildEffectRecord((e) => shaderEffects[e].intensity ?? 0);
@@ -91,15 +100,15 @@ const settings = useSettings();
 const bpm = settings.bpm;
 const effectTransitions = useEffectTransitions(initialActiveEffects, initialIntensities);
 const playlist = useVideoPlaylist(settings.inputSource);
-const player = useVideoPlayer(
+const player = useVideoPlayer({
   videoRef,
   randomizeRef1,
   randomizeRef2,
-  playlist.videoPlaylist,
-  playlist.selectedVideoIndex,
-  settings.inputSource,
-  settings.isMuted
-);
+  videoPlaylist: playlist.videoPlaylist,
+  selectedVideoIndex: playlist.selectedVideoIndex,
+  inputSource: settings.inputSource,
+  isMuted: settings.isMuted
+});
 
 useVideoSource(videoRef, settings.inputSource, player.loadedVideoIndex, playlist.videoPlaylist);
 
@@ -125,7 +134,8 @@ watch(
 watch(
   () => player.isVideoPlaying.value,
   (playing) => {
-    if (!playing) showNotRenderableWarning.value = false;
+    if (playing) videoEverStarted.value = true;
+    else showNotRenderableWarning.value = false;
   }
 );
 
@@ -146,7 +156,6 @@ useWebGPURenderer({
   activeEffects: effectTransitions.renderingEffects,
   effectIntensities: effectTransitions.renderingIntensities,
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
-  inputSource: settings.inputSource,
   bpm,
   onRenderPerformance: handleRenderPerformance,
   onFrameQuality: (lumaAvg, variance) => {
@@ -154,6 +163,9 @@ useWebGPURenderer({
   },
   onVideoNotRenderable: () => {
     showNotRenderableWarning.value = true;
+  },
+  onRendererUnavailable: () => {
+    showRendererUnavailable.value = true;
   }
 });
 
@@ -172,16 +184,6 @@ const midi = useMidi({
     }, MIDI_NOTIFICATION_DURATION_MS);
   }
 });
-
-// Set once the user has ever started playback — suppresses the hint permanently
-// so a brief not-playing state during video transitions doesn't flash the message.
-const videoEverStarted = ref(false);
-watch(
-  () => player.isVideoPlaying.value,
-  (playing) => {
-    if (playing) videoEverStarted.value = true;
-  }
-);
 
 const showNoVideoMessage = computed(
   () =>

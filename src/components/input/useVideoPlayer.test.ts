@@ -17,15 +17,15 @@ describe('useVideoPlayer', () => {
 
   function setup() {
     return withSetup(() =>
-      useVideoPlayer(
+      useVideoPlayer({
         videoRef,
         randomizeRef1,
         randomizeRef2,
         videoPlaylist,
         selectedVideoIndex,
-        inputSourceRef,
-        isMutedRef
-      )
+        inputSource: inputSourceRef,
+        isMuted: isMutedRef
+      })
     );
   }
 
