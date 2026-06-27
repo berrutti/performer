@@ -32,6 +32,7 @@
         :helpVisible="state.isHelpVisible"
         :midi-connected="state.midiConnected"
         :midi-device-name="state.midiDeviceName"
+        :midi-active-bank="state.midiActiveBank"
         :bpm="state.bpm"
         :randomize-beat="state.randomizeBeat"
         @toggle-effect="send({ type: 'toggle-effect', effect: $event })"

@@ -23,13 +23,14 @@
     <div v-if="midiConnected" class="midi-status">
       <div class="midi-indicator">MIDI: {{ midiDeviceName }}</div>
       <p class="control-description">
-        Knobs 1-7 control intensity. Top row pads toggle + knob. Bottom row pads toggle only.
+        Pads toggle effects. Knobs control the highlighted intensities. Press Shift to switch knob
+        bank ({{ midiActiveBank + 1 }}/{{ KNOB_BANK_COUNT }}).
       </p>
     </div>
 
     <div class="effects-grid">
       <div
-        v-for="effect in allEffects"
+        v-for="effect in orderedEffects"
         :key="effect"
         :class="[
           'effect-btn',
@@ -39,7 +40,11 @@
       >
         <button class="effect-btn__toggle" @click="emit('toggle-effect', effect)">
           <span class="effect-btn__name">{{ formatName(effect) }}</span>
-          <span v-if="midiControlledEffects.has(effect)" class="effect-btn__midi-dot" />
+          <span
+            v-if="midiConnected"
+            class="effect-btn__midi-dot"
+            :class="{ 'effect-btn__midi-dot--inactive': !midiControlledEffects.has(effect) }"
+          />
         </button>
         <input
           v-if="shaderEffects[effect].intensity !== undefined"
@@ -86,7 +91,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ShaderEffect, shaderEffects } from '@/utils';
-import { KNOB_CONTROLLED_EFFECTS } from '@/composables/useMidi';
+import { KNOB_EFFECT_ORDER, KNOB_BANK_SIZE, KNOB_BANK_COUNT } from '@/composables/useMidi';
 
 const props = withDefaults(
   defineProps<{
@@ -96,12 +101,14 @@ const props = withDefaults(
     helpVisible: boolean;
     midiConnected?: boolean;
     midiDeviceName?: string;
+    midiActiveBank?: number;
     bpm: number;
     randomizeBeat?: { beat: number; total: number } | null;
   }>(),
   {
     midiConnected: false,
     midiDeviceName: '',
+    midiActiveBank: 0,
     randomizeBeat: null
   }
 );
@@ -116,10 +123,14 @@ const emit = defineEmits<{
 
 const midiControlledEffects = computed<ReadonlySet<ShaderEffect>>(() => {
   if (!props.midiConnected) return new Set();
-  return KNOB_CONTROLLED_EFFECTS;
+  const start = props.midiActiveBank * KNOB_BANK_SIZE;
+  return new Set(KNOB_EFFECT_ORDER.slice(start, start + KNOB_BANK_SIZE));
 });
 
-const allEffects: ShaderEffect[] = Object.values(ShaderEffect);
+const orderedEffects: ShaderEffect[] = [
+  ...KNOB_EFFECT_ORDER,
+  ...Object.values(ShaderEffect).filter((effect) => !KNOB_EFFECT_ORDER.includes(effect))
+];
 
 const localBpm = ref(props.bpm);
 const bpmFocused = ref(false);
