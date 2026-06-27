@@ -1,3 +1,5 @@
+mod midi;
+
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Manager;
 
@@ -6,7 +8,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(midi::MidiState::default())
         .setup(|app| {
+            midi::start(app.handle().clone());
             let icon = app.default_window_icon().cloned();
             let about = AboutMetadataBuilder::new()
                 .name(Some("Performer"))
@@ -25,7 +29,7 @@ pub fn run() {
             app.set_menu(menu)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![midi::midi_status, midi::midi_send])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if window.label() == "main" {

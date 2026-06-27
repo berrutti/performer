@@ -18,6 +18,7 @@ export interface AppState {
   isRandomizeActive: boolean;
   isVideoPlaying: boolean;
   loadedVideoIndex: number;
+  midiActiveBank: number;
   midiConnected: boolean;
   midiDeviceName: string;
   randomizeBeat: { beat: number; total: number } | null;

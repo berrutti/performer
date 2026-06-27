@@ -182,7 +182,8 @@ const midi = useMidi({
     setTimeout(() => {
       showMidiSyncNotification.value = false;
     }, MIDI_NOTIFICATION_DURATION_MS);
-  }
+  },
+  activeEffects: effectTransitions.activeEffects
 });
 
 const showNoVideoMessage = computed(
@@ -201,6 +202,7 @@ const appState = computed(() => ({
   isMuted: settings.isMuted.value,
   isRandomizeActive: randomize.isActive.value,
   randomizeBeat: randomize.beatProgress.value ? { ...randomize.beatProgress.value } : null,
+  midiActiveBank: midi.activeBank.value,
   midiConnected: midi.connected.value,
   midiDeviceName: midi.deviceName.value,
   bpm: bpm.value,
