@@ -67,7 +67,7 @@ import { useVideoSource } from '@/components/input/useVideoSource';
 import { useMidi } from '@/composables/useMidi';
 import { useBeatmatcherLink } from '@/composables/useBeatmatcherLink';
 import { useWebGPURenderer } from '@/composables/useWebGPURenderer';
-import { useRandomizeMode } from '@/composables/useRandomizeMode';
+import { useRandomizeMode, beatGridClock } from '@/composables/useRandomizeMode';
 import { useFrameQualityGuard } from '@/composables/useFrameQualityGuard';
 import { CHANNEL_NAME, type FromControls, type FromMain } from '@/broadcast';
 import packageJson from '../../package.json';
@@ -94,7 +94,7 @@ const showSplash = ref(true);
 const showNotRenderableWarning = ref(false);
 const showRendererUnavailable = ref(false);
 
-// Set once the user has ever started playback — suppresses the hint permanently
+// Set once the user has ever started playback, suppressing the hint permanently
 // so a brief not-playing state during video transitions doesn't flash the message.
 const videoEverStarted = ref(false);
 
@@ -128,7 +128,7 @@ const randomize = useRandomizeMode(
     player.applyVideoSnapshot(snapshot);
   },
   player.preloadUpcomingVideo,
-  () => beatmatcher.getBeatNow()
+  () => beatmatcher.getBeat()
 );
 
 watch(
@@ -149,7 +149,10 @@ watch(
 const { onQualityData } = useFrameQualityGuard(
   computed(() => effectTransitions.renderingEffects.value),
   effectTransitions.renderingIntensities,
-  (effect, intensity) => effectTransitions.handleIntensityChange(effect, intensity)
+  (effect, intensity) => effectTransitions.handleIntensityChange(effect, intensity),
+  (effect) => {
+    if (effectTransitions.activeEffects.value[effect]) effectTransitions.handleToggleEffect(effect);
+  }
 );
 
 function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
@@ -164,10 +167,11 @@ useWebGPURenderer({
   effectIntensities: effectTransitions.renderingIntensities,
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
   bpm,
-  getBeatClock: () => beatmatcher.getBeatClock(),
+  getBeatClock: (timeSec) =>
+    beatmatcher.getBeatClock() ?? beatGridClock(timeSec, bpm.value, randomize.getBeatGridOrigin()),
   onRenderPerformance: handleRenderPerformance,
-  onFrameQuality: (lumaAvg, variance) => {
-    if (randomize.isActive.value) onQualityData(lumaAvg, variance);
+  onFrameQuality: (quality) => {
+    if (randomize.isActive.value) onQualityData(quality);
   },
   onVideoNotRenderable: () => {
     showNotRenderableWarning.value = true;
@@ -213,7 +217,7 @@ const appState = computed(() => ({
   inputSource: settings.inputSource.value,
   isMuted: settings.isMuted.value,
   isRandomizeActive: randomize.isActive.value,
-  randomizeBeat: randomize.beatProgress.value ? { ...randomize.beatProgress.value } : null,
+  randomizePhrase: randomize.phrase.value ? { ...randomize.phrase.value } : null,
   midiActiveBank: midi.activeBank.value,
   midiConnected: midi.connected.value,
   midiDeviceName: midi.deviceName.value,

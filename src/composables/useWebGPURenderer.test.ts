@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref, computed } from 'vue';
 import { withSetup } from '@/test/utils';
-import { useWebGPURenderer, computeCrop } from './useWebGPURenderer';
+import {
+  useWebGPURenderer,
+  computeCrop,
+  channelsDisagree,
+  createGarbledDetector,
+  RD_STEPS_PER_FRAME
+} from './useWebGPURenderer';
 import { buildEffectRecord } from '@/utils';
 
 const allEffectsOff = buildEffectRecord(() => false);
@@ -70,5 +76,56 @@ describe('computeCrop', () => {
 
   it('crops vertically when the video is taller than the canvas', () => {
     expect(computeCrop(100, 200, 100, 100)).toEqual([0, 1, 0.25, 0.75]);
+  });
+});
+
+describe('channelsDisagree', () => {
+  it('flags a frame whose colors arrive garbled, like 10-bit video on WebKit', () => {
+    expect(channelsDisagree([0.02, 0.02, 0.02], [0.1, 0.1, 0.95])).toBe(true);
+  });
+
+  it('tolerates ordinary color-conversion differences', () => {
+    expect(channelsDisagree([0.5, 0.5, 0.5], [0.53, 0.47, 0.56])).toBe(false);
+  });
+});
+
+describe('createGarbledDetector', () => {
+  const clean: [number, number, number] = [0.5, 0.5, 0.5];
+  const garbled: [number, number, number] = [0.1, 0.1, 0.95];
+
+  it('reports once, after several garbled probes in a row', () => {
+    const onGarbled = vi.fn();
+    const detector = createGarbledDetector(onGarbled);
+    detector.check(garbled, clean);
+    detector.check(garbled, clean);
+    expect(onGarbled).not.toHaveBeenCalled();
+
+    for (let probe = 0; probe < 5; probe++) detector.check(garbled, clean);
+    expect(onGarbled).toHaveBeenCalledOnce();
+  });
+
+  it('ignores isolated disagreements, like a frame change between the two reads', () => {
+    const onGarbled = vi.fn();
+    const detector = createGarbledDetector(onGarbled);
+    for (let probe = 0; probe < 5; probe++) {
+      detector.check(garbled, clean);
+      detector.check(clean, clean);
+    }
+    expect(onGarbled).not.toHaveBeenCalled();
+  });
+
+  it('reports again for the next video after a reset', () => {
+    const onGarbled = vi.fn();
+    const detector = createGarbledDetector(onGarbled);
+    for (let probe = 0; probe < 3; probe++) detector.check(garbled, clean);
+    detector.reset();
+    for (let probe = 0; probe < 3; probe++) detector.check(garbled, clean);
+    expect(onGarbled).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('reaction-diffusion', () => {
+  it('runs an even number of steps per frame, so the state ends where the composite reads it', () => {
+    expect(RD_STEPS_PER_FRAME % 2).toBe(0);
   });
 });

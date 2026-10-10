@@ -20,8 +20,6 @@ pub struct Deck {
     position_sec: f64,
     #[serde(rename = "playbackRate")]
     playback_rate: f64,
-    #[serde(rename = "nudgeFactor")]
-    nudge_factor: f64,
     #[serde(rename = "effectiveBpm")]
     effective_bpm: Option<f64>,
     #[serde(rename = "currentBeat")]
@@ -101,4 +99,18 @@ pub fn start(app: AppHandle) {
             thread::sleep(POLL_INTERVAL);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BEATMATCHER_8_SNAPSHOT: &str = r#"{"schemaVersion":1,"epochMs":1791561457807,"sampleRate":44100,"decks":[{"id":"A","isPlaying":true,"bpm":128.0,"beatOffsetSec":0.1,"positionSec":12.5,"playbackRate":1.0,"jogHoldFactor":1.0,"effectiveBpm":128.0,"currentBeat":26.45}]}"#;
+
+    #[test]
+    fn parses_snapshot_with_unread_deck_fields() {
+        let state: BeatmatcherState = serde_json::from_str(BEATMATCHER_8_SNAPSHOT).unwrap();
+        assert_eq!(state.decks.len(), 1);
+        assert_eq!(state.decks[0].effective_bpm, Some(128.0));
+    }
 }

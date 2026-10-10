@@ -1,38 +1,67 @@
 import { type ComputedRef } from 'vue';
-import { ShaderEffect } from '@/utils';
+import { ShaderEffect, shaderEffects } from '@/utils';
+import type { FrameQuality } from '@/composables/useWebGPURenderer';
 
-const STEP_DOWN = 0.1;
+const STEP_DOWN = 0.15;
 const MIN_INTENSITY = 0.1;
-const BRIGHT_THRESHOLD = 0.88;
-const UNIFORM_VARIANCE_THRESHOLD = 0.002;
+const BRIGHT_MEAN = 0.68;
+const BRIGHTER_THAN_SOURCE = 0.15;
+const FLAT_VARIANCE = 0.002;
+const DETAILED_SOURCE_VARIANCE = 0.006;
+const DARK_SOURCE_MEAN = 0.4;
 
-// Probes the rendered image via GPU readback (see useWebGPURenderer onFrameQuality).
-// When the frame looks blown-out or uniformly grey, the loudest active effect is stepped
-// down by STEP_DOWN. The change is made directly to the real intensity state — no hidden
-// override layer, no restoration. Subsequent probes will keep stepping until the image
-// clears or all effects are at floor.
+const WASHING_EFFECTS: ShaderEffect[] = [
+  ShaderEffect.REACTION_DIFFUSION,
+  ShaderEffect.PALETTE_CYCLING,
+  ShaderEffect.CONTOUR,
+  ShaderEffect.AURORA,
+  ShaderEffect.FEEDBACK_ECHO,
+  ShaderEffect.REALITY_GLITCH
+];
+
+export type QualityCorrection =
+  | { kind: 'disable'; effect: ShaderEffect }
+  | { kind: 'reduce'; effect: ShaderEffect; intensity: number };
+
+export function chooseCorrection(
+  { source, output }: FrameQuality,
+  active: Record<ShaderEffect, boolean>,
+  intensities: Record<ShaderEffect, number>
+): QualityCorrection | null {
+  const blownOut = output.mean > BRIGHT_MEAN && output.mean > source.mean + BRIGHTER_THAN_SOURCE;
+  const flattened = output.variance < FLAT_VARIANCE && source.variance > DETAILED_SOURCE_VARIANCE;
+  if (!blownOut && !flattened) return null;
+
+  if (blownOut && active[ShaderEffect.INVERT] && source.mean < DARK_SOURCE_MEAN) {
+    return { kind: 'disable', effect: ShaderEffect.INVERT };
+  }
+
+  const reducible = Object.values(ShaderEffect).filter(
+    (e) =>
+      active[e] && shaderEffects[e].intensity !== undefined && (intensities[e] ?? 0) > MIN_INTENSITY
+  );
+  if (reducible.length === 0) return null;
+
+  const effect =
+    WASHING_EFFECTS.find((e) => reducible.includes(e)) ??
+    reducible.reduce((a, b) => ((intensities[a] ?? 0) >= (intensities[b] ?? 0) ? a : b));
+  return {
+    kind: 'reduce',
+    effect,
+    intensity: Math.max(MIN_INTENSITY, (intensities[effect] ?? 0) - STEP_DOWN)
+  };
+}
+
 export function useFrameQualityGuard(
   activeEffects: ComputedRef<Record<ShaderEffect, boolean>>,
   effectIntensities: ComputedRef<Record<ShaderEffect, number>>,
-  onReduceEffect: (effect: ShaderEffect, intensity: number) => void
+  onReduceEffect: (effect: ShaderEffect, intensity: number) => void,
+  onDisableEffect: (effect: ShaderEffect) => void
 ) {
-  function onQualityData(lumaAvg: number, variance: number) {
-    const isBad = lumaAvg > BRIGHT_THRESHOLD || variance < UNIFORM_VARIANCE_THRESHOLD;
-    if (!isBad) return;
-
-    const active = (Object.values(ShaderEffect) as ShaderEffect[]).filter(
-      (e) => activeEffects.value[e] && (effectIntensities.value[e] ?? 0) > MIN_INTENSITY
-    );
-    if (active.length === 0) return;
-
-    const loudest = active.reduce((a, b) =>
-      (effectIntensities.value[a] ?? 0) >= (effectIntensities.value[b] ?? 0) ? a : b
-    );
-
-    onReduceEffect(
-      loudest,
-      Math.max(MIN_INTENSITY, (effectIntensities.value[loudest] ?? 0) - STEP_DOWN)
-    );
+  function onQualityData(quality: FrameQuality) {
+    const correction = chooseCorrection(quality, activeEffects.value, effectIntensities.value);
+    if (correction?.kind === 'disable') onDisableEffect(correction.effect);
+    else if (correction?.kind === 'reduce') onReduceEffect(correction.effect, correction.intensity);
   }
 
   return { onQualityData };

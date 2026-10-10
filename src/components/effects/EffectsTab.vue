@@ -16,9 +16,7 @@
         @change="onBpmChange"
         @keydown.enter="($event.target as HTMLInputElement).blur()"
       />
-      <span v-if="randomizeBeat" class="beat-counter">
-        {{ randomizeBeat.beat }}&thinsp;/&thinsp;{{ randomizeBeat.total }}
-      </span>
+      <PhraseIndicator v-if="randomizePhrase" :phrase="randomizePhrase" />
     </div>
 
     <div class="beat-source-row">
@@ -29,7 +27,7 @@
         {{ beatmatcherStatusText }}
       </span>
       <button
-        v-if="randomizeBeat"
+        v-if="randomizePhrase"
         class="restart-beat-btn"
         title="Restart randomize's phrase count from now. Use this if a Beatmatcher deck's grid is mis-analyzed, or to resync manual-BPM switches to what you're hearing."
         @click="emit('restart-beat')"
@@ -110,7 +108,9 @@
 import { computed, ref, watch } from 'vue';
 import { ShaderEffect, shaderEffects } from '@/utils';
 import { KNOB_EFFECT_ORDER, KNOB_BANK_SIZE, KNOB_BANK_COUNT } from '@/composables/useMidi';
-import type { BeatmatcherDeck } from '@/composables/useBeatmatcherLink';
+import type { BeatmatcherDeckStatus } from '@/composables/useBeatmatcherLink';
+import type { RandomizePhrase } from '@/composables/useRandomizeMode';
+import PhraseIndicator from './PhraseIndicator.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -122,17 +122,17 @@ const props = withDefaults(
     midiDeviceName?: string;
     midiActiveBank?: number;
     bpm: number;
-    randomizeBeat?: { beat: number; total: number } | null;
+    randomizePhrase?: RandomizePhrase | null;
     beatmatcherAvgBpm: number | null;
     beatmatcherConnected: boolean;
-    beatmatcherDecks: BeatmatcherDeck[];
+    beatmatcherDecks: BeatmatcherDeckStatus[];
     beatmatcherFollowing: boolean;
   }>(),
   {
     midiConnected: false,
     midiDeviceName: '',
     midiActiveBank: 0,
-    randomizeBeat: null
+    randomizePhrase: null
   }
 );
 
