@@ -1,6 +1,7 @@
 import type { ShaderEffect } from './utils';
 import type { VideoPlaylistItem } from './components/input/useVideoPlaylist';
-import type { BeatmatcherDeck } from './composables/useBeatmatcherLink';
+import type { BeatmatcherDeckStatus } from './composables/useBeatmatcherLink';
+import type { RandomizePhrase } from './composables/useRandomizeMode';
 
 export const CHANNEL_NAME = 'performer-controls';
 
@@ -10,7 +11,7 @@ export interface AppState {
   activeEffects: Record<ShaderEffect, boolean>;
   beatmatcherAvgBpm: number | null;
   beatmatcherConnected: boolean;
-  beatmatcherDecks: BeatmatcherDeck[];
+  beatmatcherDecks: BeatmatcherDeckStatus[];
   beatmatcherFollowing: boolean;
   bpm: number;
   bpmSyncEnabled: Record<ShaderEffect, boolean>;
@@ -26,7 +27,7 @@ export interface AppState {
   midiActiveBank: number;
   midiConnected: boolean;
   midiDeviceName: string;
-  randomizeBeat: { beat: number; total: number } | null;
+  randomizePhrase: RandomizePhrase | null;
   selectedVideoIndex: number;
   videoPlaylist: VideoPlaylistItem[];
 }

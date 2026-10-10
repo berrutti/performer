@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -12,8 +12,8 @@ const DAW_KEYWORD: &str = "daw";
 const FALLBACK_KEYWORD: &str = "launchkey";
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
-// Note On, channel 16, note 0x0C: tells the Launchkey to hand control of the pads
-// and knobs to the host (DAW mode), which also unlocks pad LED control.
+// The Launchkey only hands its pads and knobs to the host, and lets it drive the pad
+// LEDs, while in DAW mode.
 const DAW_MODE_ON: [u8; 3] = [0x9F, 0x0C, 0x7F];
 const DAW_MODE_OFF: [u8; 3] = [0x9F, 0x0C, 0x00];
 
@@ -139,31 +139,44 @@ fn try_connect(app: &AppHandle) -> Option<(MidiInputConnection<()>, String)> {
     Some((in_conn, name))
 }
 
+// Device presence is polled through one long-lived client created on the main thread:
+// CoreMIDI only refreshes a process's device list on the run loop of the thread that
+// created its first client, and coremidi never disposes clients, so creating one per
+// poll would leak a client every second.
+fn create_watcher(app: &AppHandle) -> Option<MidiInput> {
+    let (tx, rx) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(MidiInput::new("performer-midi-watch").ok());
+    })
+    .ok()?;
+    rx.recv().ok().flatten()
+}
+
 pub fn start(app: AppHandle) {
     thread::spawn(move || {
+        let mut watcher: Option<MidiInput> = None;
         let mut input_conn: Option<MidiInputConnection<()>> = None;
 
         loop {
-            if input_conn.is_none() {
+            if watcher.is_none() {
+                watcher = create_watcher(&app);
+            }
+            let present = watcher.as_ref().and_then(find_input).is_some();
+
+            if input_conn.is_none() && present {
                 if let Some((conn, name)) = try_connect(&app) {
                     input_conn = Some(conn);
                     let _ = app.emit("midi:connected", ConnectedPayload { name });
                 }
-            } else {
-                let still_present = MidiInput::new("performer-midi-watch")
-                    .ok()
-                    .and_then(|m| find_input(&m))
-                    .is_some();
-                if !still_present {
-                    input_conn = None;
-                    let state = app.state::<MidiState>();
-                    if let Some(conn) = state.output.lock().unwrap().as_mut() {
-                        let _ = conn.send(&DAW_MODE_OFF);
-                    }
-                    *state.device.lock().unwrap() = None;
-                    *state.output.lock().unwrap() = None;
-                    let _ = app.emit("midi:disconnected", ());
+            } else if input_conn.is_some() && !present {
+                input_conn = None;
+                let state = app.state::<MidiState>();
+                if let Some(conn) = state.output.lock().unwrap().as_mut() {
+                    let _ = conn.send(&DAW_MODE_OFF);
                 }
+                *state.device.lock().unwrap() = None;
+                *state.output.lock().unwrap() = None;
+                let _ = app.emit("midi:disconnected", ());
             }
             thread::sleep(POLL_INTERVAL);
         }

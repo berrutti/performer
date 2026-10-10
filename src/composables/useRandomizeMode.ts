@@ -5,9 +5,10 @@ import type { VideoPlaylistItem } from '@/components/input/useVideoPlaylist';
 const WAIT_BEATS = [16, 32] as const;
 const KEEP_VIDEO_PROBABILITY = 0.2;
 const LATE_THRESHOLD_BEATS = 1.5;
+// The followed beat count only drops by more than this when the reference deck changes
+// or jumps back (new track, cue), and waiting for it to catch up could take minutes.
+const JUMP_BACK_THRESHOLD_BEATS = 1;
 
-// Per-effect probability of appearing in a random snapshot.
-// Sum ~5.3 across 14 effects → ~4-5 active on average.
 // REALITY_GLITCH and PALETTE_CYCLING are kept rare so they feel special.
 const EFFECT_WEIGHTS: Record<ShaderEffect, number> = {
   [ShaderEffect.INVERT]: 0.35,
@@ -35,6 +36,22 @@ export interface RandomizeSnapshot {
 }
 
 const BEAT_POLL_MS = 50;
+// The controls window extrapolates the phrase from its own clock, so smaller drifts of the
+// followed deck aren't worth a re-broadcast.
+const PHRASE_DRIFT_MS = 15;
+
+export interface BeatSource {
+  beat: number;
+  bpm: number;
+}
+
+// Absolute (epoch ms) so the controls window can count the beats from its own clock instead
+// of being sent each one late and unevenly.
+export interface RandomizePhrase {
+  startedAt: number;
+  beatMs: number;
+  total: number;
+}
 
 export function useRandomizeMode(
   bpm: Ref<number>,
@@ -42,20 +59,20 @@ export function useRandomizeMode(
   loadedVideoIndex: Ref<number>,
   onApply: (snapshot: RandomizeSnapshot) => void,
   onSchedule?: (snapshot: RandomizeSnapshot) => void,
-  // Continuous, phase-locked beat count from an external clock (e.g. Beatmatcher).
-  // When it returns a number, phrase switches lock to real phrase boundaries instead
-  // of counting from whenever randomize mode happened to be toggled on.
-  getBeatNow?: () => number | null
+  getBeat?: () => BeatSource | null
 ) {
   const isActive = ref(false);
-  const beatProgress = ref<{ beat: number; total: number } | null>(null);
+  const phrase = ref<RandomizePhrase | null>(null);
+  // The renderer phase-locks the shaders' beat pulses to this (performance.now() ms), so the
+  // pulses, the counter and the switches share one beat grid.
+  let beatGridOrigin = 0;
+  let pollId: ReturnType<typeof setInterval> | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  let progressIntervalId: ReturnType<typeof setInterval> | null = null;
-  let beatPollId: ReturnType<typeof setInterval> | null = null;
-  let intervalStart = 0;
-  let intervalTotal = 0;
-  let intervalStartBeat = 0;
   let pendingSnapshot: RandomizeSnapshot | null = null;
+  let intervalTotal = 0;
+  let beatDriven = false;
+  let intervalStartBeat = 0;
+  let lastBeatNow = 0;
 
   // Local re-stamp of "beat 1", since Beatmatcher's beat grid can be mis-analyzed
   // or the user may simply want phrase switches to land on a different downbeat.
@@ -81,7 +98,7 @@ export function useRandomizeMode(
       }
     }
 
-    // Guarantee at least one effect, excluding the two noisiest so a solo appearance is pleasant
+    // The two noisiest are left out so a lone effect is a pleasant one.
     if (selected.length === 0) {
       const candidates = Object.values(ShaderEffect).filter(
         (e) => e !== ShaderEffect.REALITY_GLITCH && e !== ShaderEffect.PALETTE_CYCLING
@@ -119,15 +136,32 @@ export function useRandomizeMode(
     };
   }
 
-  function updateBeatProgress() {
-    if (!isActive.value || intervalTotal === 0) {
-      beatProgress.value = null;
+  function beatMs(): number {
+    return (60 / bpm.value) * 1000;
+  }
+
+  function epochNow(): number {
+    return performance.timeOrigin + performance.now();
+  }
+
+  // Every new object re-broadcasts the whole app state, so it only changes when the phrase
+  // or its tempo really does.
+  function setPhrase(startedAt: number, phraseBeatMs: number) {
+    const current = phrase.value;
+    if (
+      current &&
+      current.total === intervalTotal &&
+      Math.abs(current.startedAt - startedAt) < PHRASE_DRIFT_MS &&
+      Math.abs(current.beatMs - phraseBeatMs) < 0.5
+    ) {
       return;
     }
-    const beatMs = (60 / bpm.value) * 1000;
-    const elapsed = performance.now() - intervalStart;
-    const beat = Math.min(Math.floor(elapsed / beatMs) + 1, intervalTotal);
-    beatProgress.value = { beat, total: intervalTotal };
+    phrase.value = { startedAt, beatMs: phraseBeatMs, total: intervalTotal };
+  }
+
+  function syncPhraseToBeat(source: BeatSource) {
+    const sourceBeatMs = 60000 / source.bpm;
+    setPhrase(epochNow() - (source.beat - intervalStartBeat) * sourceBeatMs, sourceBeatMs);
   }
 
   function nextPhraseBoundary(beatNow: number, total: number): number {
@@ -135,123 +169,126 @@ export function useRandomizeMode(
     return phraseOffset + (cyclesPassed + 1) * total;
   }
 
-  function updateBeatProgressFromBeat(beatNow: number) {
-    if (!isActive.value || intervalTotal === 0) {
-      beatProgress.value = null;
-      return;
-    }
-    const beat = Math.min(Math.max(1, Math.floor(beatNow - intervalStartBeat) + 1), intervalTotal);
-    beatProgress.value = { beat, total: intervalTotal };
-  }
-
-  function scheduleNextBeatDriven(fromBeat: number) {
-    const total = WAIT_BEATS[Math.floor(Math.random() * WAIT_BEATS.length)];
-    const nextSwitchBeat = nextPhraseBoundary(fromBeat, total);
-    intervalStartBeat = nextSwitchBeat - total;
-    intervalTotal = total;
-
+  function queueNext() {
+    intervalTotal = WAIT_BEATS[Math.floor(Math.random() * WAIT_BEATS.length)];
     pendingSnapshot = buildSnapshot();
     onSchedule?.(pendingSnapshot);
   }
 
-  function pollBeatClock() {
-    const beatNow = getBeatNow?.();
-    if (beatNow === null || beatNow === undefined) return;
-    updateBeatProgressFromBeat(beatNow);
+  function applyPending() {
+    if (pendingSnapshot) onApply(pendingSnapshot);
+    queueNext();
+  }
 
-    const targetBeat = intervalStartBeat + intervalTotal;
-    if (beatNow >= targetBeat && pendingSnapshot) {
-      const snapshot = pendingSnapshot;
-      onApply(snapshot);
-      // If the poll picked this up more than 1.5 beats past the target (tab was
-      // backgrounded, system slept, etc.), re-anchor from now instead of replaying
-      // every missed phrase boundary in a rapid-fire catch-up burst.
-      const fireLate = beatNow - targetBeat;
-      scheduleNextBeatDriven(fireLate > LATE_THRESHOLD_BEATS ? beatNow : targetBeat);
+  function clearWallTimer() {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
     }
   }
 
-  // Re-stamps "beat 1" to the current instant and re-schedules the pending switch onto
-  // the new phrase grid. Works whether or not an external beat clock (e.g. Beatmatcher)
-  // is driving scheduling — with no external clock, it just restarts the wall-clock
-  // phrase timer from now, letting the user resync switches to what they're hearing.
-  function restartBeat() {
-    if (!isActive.value) return;
+  function anchorToBeat(fromBeat: number) {
+    clearWallTimer();
+    beatDriven = true;
+    intervalStartBeat = nextPhraseBoundary(fromBeat, intervalTotal) - intervalTotal;
+  }
 
-    const beatNow = getBeatNow?.();
-    if (beatNow !== null && beatNow !== undefined) {
-      phraseOffset = beatNow;
-      if (beatPollId !== null) scheduleNextBeatDriven(beatNow);
+  function anchorToWall(start: number) {
+    clearWallTimer();
+    beatDriven = false;
+    beatGridOrigin = start;
+    const ms = beatMs();
+    const switchAt = start + intervalTotal * ms;
+    setPhrase(performance.timeOrigin + start, ms);
+    timeoutId = setTimeout(
+      () => {
+        timeoutId = null;
+        if (!isActive.value) return;
+        applyPending();
+        // If the timer fired more than 1.5 beats late (fullscreen transition, app suspend,
+        // etc.), re-anchor from now so subsequent switches resume correctly rather than
+        // cascading at zero delay trying to catch up.
+        const now = performance.now();
+        anchorToWall(now - switchAt > LATE_THRESHOLD_BEATS * ms ? now : switchAt);
+      },
+      Math.max(0, switchAt - performance.now())
+    );
+  }
+
+  function pollBeatClock() {
+    const source = getBeat?.() ?? null;
+    if (source === null) {
+      // The beat clock dropped out (Beatmatcher quit, or no deck is playing), so the rest
+      // of the phrase carries over to the manual BPM instead of switching stopping.
+      if (beatDriven) {
+        const beatsIn = Math.min(Math.max(0, lastBeatNow - intervalStartBeat), intervalTotal);
+        anchorToWall(performance.now() - beatsIn * beatMs());
+      }
       return;
     }
 
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-      scheduleNext(performance.now());
+    const beatNow = source.beat;
+    if (!beatDriven || beatNow < intervalStartBeat - JUMP_BACK_THRESHOLD_BEATS) {
+      anchorToBeat(beatNow);
     }
+    lastBeatNow = beatNow;
+
+    const targetBeat = intervalStartBeat + intervalTotal;
+    if (beatNow >= targetBeat) {
+      applyPending();
+      // If the poll picked this up more than 1.5 beats past the target (tab was
+      // backgrounded, system slept, etc.), re-anchor from now instead of replaying
+      // every missed phrase boundary in a rapid-fire catch-up burst.
+      anchorToBeat(beatNow - targetBeat > LATE_THRESHOLD_BEATS ? beatNow : targetBeat);
+    }
+    syncPhraseToBeat(source);
   }
 
-  function scheduleNext(start: number) {
-    const total = WAIT_BEATS[Math.floor(Math.random() * WAIT_BEATS.length)];
-    const beatMs = (60 / bpm.value) * 1000;
-    const nextStart = start + total * beatMs;
-    const delay = Math.max(0, nextStart - performance.now());
+  function restartBeat() {
+    if (!isActive.value) return;
 
-    intervalStart = start;
-    intervalTotal = total;
-
-    const nextSnapshot = buildSnapshot();
-    onSchedule?.(nextSnapshot);
-
-    timeoutId = setTimeout(() => {
-      if (!isActive.value) return;
-      onApply(nextSnapshot);
-      // If the timer fired more than 1.5 beats late (fullscreen transition, app suspend,
-      // etc.), re-anchor from now so subsequent switches resume correctly rather than
-      // cascading at zero delay trying to catch up.
-      const fireLate = performance.now() - nextStart;
-      scheduleNext(fireLate > beatMs * 1.5 ? performance.now() : nextStart);
-    }, delay);
+    const source = getBeat?.() ?? null;
+    if (source !== null) {
+      phraseOffset = source.beat;
+      lastBeatNow = source.beat;
+      anchorToBeat(source.beat);
+      syncPhraseToBeat(source);
+    } else {
+      anchorToWall(performance.now());
+    }
   }
 
   function toggle() {
     if (isActive.value) {
       isActive.value = false;
-      beatProgress.value = null;
+      phrase.value = null;
       pendingSnapshot = null;
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      if (progressIntervalId !== null) {
-        clearInterval(progressIntervalId);
-        progressIntervalId = null;
-      }
-      if (beatPollId !== null) {
-        clearInterval(beatPollId);
-        beatPollId = null;
+      clearWallTimer();
+      if (pollId !== null) {
+        clearInterval(pollId);
+        pollId = null;
       }
     } else {
       isActive.value = true;
-      const firstSnapshot = buildSnapshot();
-      onApply(firstSnapshot);
+      onApply(buildSnapshot());
+      queueNext();
 
-      const beatNow = getBeatNow?.();
-      if (beatNow !== null && beatNow !== undefined) {
-        scheduleNextBeatDriven(beatNow);
-        beatPollId = setInterval(pollBeatClock, BEAT_POLL_MS);
+      const source = getBeat?.() ?? null;
+      if (source !== null) {
+        lastBeatNow = source.beat;
+        anchorToBeat(source.beat);
+        syncPhraseToBeat(source);
       } else {
-        scheduleNext(performance.now());
-        progressIntervalId = setInterval(updateBeatProgress, 80);
+        anchorToWall(performance.now());
       }
+      pollId = setInterval(pollBeatClock, BEAT_POLL_MS);
     }
   }
 
   onUnmounted(() => {
-    if (timeoutId !== null) clearTimeout(timeoutId);
-    if (progressIntervalId !== null) clearInterval(progressIntervalId);
-    if (beatPollId !== null) clearInterval(beatPollId);
+    clearWallTimer();
+    if (pollId !== null) clearInterval(pollId);
   });
 
-  return { isActive, beatProgress, toggle, restartBeat };
+  return { isActive, phrase, toggle, restartBeat, getBeatGridOrigin: () => beatGridOrigin };
 }

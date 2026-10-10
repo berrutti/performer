@@ -56,7 +56,7 @@ Vue reactive proxies cannot be structured-cloned, so everything posted on the ch
 
 `useWebGPURenderer.ts` owns the render loop. Each frame the video element is imported as an external texture, blitted with aspect-ratio crop, run through the active effect chain, and presented.
 
-Three render targets rotate each frame: one holds the previous frame's final output (the history texture for feedback effects), the other two ping-pong for the current frame's effect chain. After present, the RT that received the final output becomes next frame's history. This avoids any per-frame texture copies; all bind group combinations are precomputed on resize.
+Three render targets rotate each frame: one holds the previous frame's final output (the history texture for feedback effects), the other two ping-pong for the current frame's effect chain. After present, the RT that received the final output becomes next frame's history (with REACTION_DIFFUSION on, the RT from just before its glow, so feedback effects can't keep re-adding the glow until the screen is white). This avoids any per-frame texture copies; all bind group combinations are precomputed on resize.
 
 ```mermaid
 flowchart TD
@@ -67,11 +67,11 @@ flowchart TD
 
     Video["video element\n(importExternalTexture)"]:::src
     Blit["Blit pass\n(aspect-ratio crop) → RT ppA"]:::pass
-    Effects["One fragment pass per active effect\nping-pong ppA ↔ ppB\n(feedback effects also bind history RT)"]:::pass
+    Effects["One fragment pass per active effect\n(all mapping effects fused into one pass)\nping-pong ppA ↔ ppB\n(feedback effects also bind history RT)"]:::pass
     RD["REACTION_DIFFUSION:\n4 Gray-Scott steps on 2 dedicated\nRD textures, then composite pass"]:::rd
     Final["Passthrough pass → canvas"]:::out
     History["final RT becomes\nnext frame's history"]:::pass
-    Readback["Quality readback\n(64 px strip, every 30 frames)\n→ luma avg + variance"]:::src
+    Readback["Quality readback\n(32×18 grid of source and output,\nevery 15 frames)\n→ luma mean + variance"]:::src
 
     Video --> Blit --> Effects --> Final
     Effects <--> RD
@@ -83,7 +83,7 @@ If WebGPU is unavailable the renderer calls `onRendererUnavailable` and `MainVie
 
 ### Frame quality guard
 
-Every 30 frames a 64 pixel strip from the center of the final render target is read back to the CPU. While randomize mode is active, `useFrameQualityGuard` checks the luma average and variance; if the frame looks blown out or uniformly flat, it steps the loudest active effect's intensity down by 0.1. The change is made to the real intensity state, with no hidden override layer.
+Every 15 frames the video right after the blit and the final render target are each downsampled to a 32×18 grid and read back to the CPU. While randomize mode is active, `useFrameQualityGuard` compares the two; if the output is much brighter than the footage itself, or flat where the footage has detail, it switches INVERT off when INVERT is whitening dark footage, and otherwise steps the most washing effect down by 0.15 (REACTION_DIFFUSION first; toggle-only effects are never picked). The change is made to the real intensity state, with no hidden override layer.
 
 ## Shader effect system
 
@@ -96,9 +96,9 @@ Effects are `ShaderEffect` enum entries with a `ShaderEffectDef` in `src/utils.t
 | `feedback` | additionally reads `u_history` (previous frame's final output)                        |
 | `compute`  | custom multi-pass pipeline (only `REACTION_DIFFUSION`, special-cased in the renderer) |
 
-The WGSL snippets live in `effectWGSL` in `src/shaderBuilderWGSL.ts` and are inserted into a stage-specific fragment shader template by `createEffectShaderWGSL`. One pipeline per effect is built once at init.
+The WGSL snippets live in `effectWGSL` in `src/shaderBuilderWGSL.ts` and are inserted into a stage-specific fragment shader template by `createEffectShaderWGSL`. `mapping` snippets are instead combined by `createMappingShaderWGSL` into one shader, so all active mapping effects run as a single pass that samples the image once. Pipelines are built once at init.
 
-The uniform buffer layout is derived at module load from `shaderEffects`: slots 0 to 5 are fixed (`time`, `bpm`, four crop values), then one `intensity_<EFFECT>` slot per effect that declares `intensity`, then one `bpmSync_<EFFECT>` slot per effect that declares `bpmSync`. Adding or removing either property automatically updates the float count, the indices (`UNIFORM_IDX`), and the WGSL `Uniforms` struct.
+The uniform buffer layout is derived at module load from `shaderEffects`: slots 0 to 6 are fixed (`time`, `bpm`, four crop values, the bitmask of active mapping effects), then one `intensity_<EFFECT>` slot per effect that declares `intensity`, then one `bpmSync_<EFFECT>` slot per effect that declares `bpmSync`. Adding or removing either property automatically updates the float count, the indices (`UNIFORM_IDX`), and the WGSL `Uniforms` struct.
 
 To add an effect: add the enum entry and `shaderEffects` record in `src/utils.ts`, then add its WGSL snippet to `effectWGSL` in `src/shaderBuilderWGSL.ts`. The renderer, uniform layout, controls UI (toggle, slider if it has `intensity`, BPM button if it has `bpmSync`), and randomize mode pick it up automatically (randomize also needs a weight in `EFFECT_WEIGHTS` in `useRandomizeMode.ts`).
 

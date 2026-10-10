@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref, computed } from 'vue';
 import { withSetup } from '@/test/utils';
-import { useWebGPURenderer, computeCrop } from './useWebGPURenderer';
+import {
+  useWebGPURenderer,
+  computeCrop,
+  channelsDisagree,
+  RD_STEPS_PER_FRAME
+} from './useWebGPURenderer';
 import { buildEffectRecord } from '@/utils';
 
 const allEffectsOff = buildEffectRecord(() => false);
@@ -70,5 +75,21 @@ describe('computeCrop', () => {
 
   it('crops vertically when the video is taller than the canvas', () => {
     expect(computeCrop(100, 200, 100, 100)).toEqual([0, 1, 0.25, 0.75]);
+  });
+});
+
+describe('channelsDisagree', () => {
+  it('flags a frame whose colors arrive garbled, like 10-bit video on WebKit', () => {
+    expect(channelsDisagree([0.02, 0.02, 0.02], [0.1, 0.1, 0.95])).toBe(true);
+  });
+
+  it('tolerates ordinary color-conversion differences', () => {
+    expect(channelsDisagree([0.5, 0.5, 0.5], [0.53, 0.47, 0.56])).toBe(false);
+  });
+});
+
+describe('reaction-diffusion', () => {
+  it('runs an even number of steps per frame, so the state ends where the composite reads it', () => {
+    expect(RD_STEPS_PER_FRAME % 2).toBe(0);
   });
 });

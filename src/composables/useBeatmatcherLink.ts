@@ -8,7 +8,6 @@ export interface BeatmatcherDeck {
   beatOffsetSec: number;
   positionSec: number;
   playbackRate: number;
-  nudgeFactor: number;
   effectiveBpm: number | null;
   currentBeat: number | null;
 }
@@ -20,11 +19,27 @@ interface BeatmatcherStatePayload {
   decks: BeatmatcherDeck[];
 }
 
+// Positions and beat counts change in every 50ms snapshot and the controls never show
+// them, so keeping them reactive would re-broadcast the whole app state 20 times a second.
+export type BeatmatcherDeckStatus = Pick<BeatmatcherDeck, 'id' | 'isPlaying' | 'effectiveBpm'>;
+
 const STALE_THRESHOLD_MS = 500;
+
+function sameDeckStatus(a: BeatmatcherDeckStatus[], b: BeatmatcherDeckStatus[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (deck, i) =>
+        deck.id === b[i].id &&
+        deck.isPlaying === b[i].isPlaying &&
+        deck.effectiveBpm === b[i].effectiveBpm
+    )
+  );
+}
 
 export function useBeatmatcherLink() {
   const connected = ref(false);
-  const decks = ref<BeatmatcherDeck[]>([]);
+  const decks = ref<BeatmatcherDeckStatus[]>([]);
 
   let latest: BeatmatcherStatePayload | null = null;
   let unlisteners: UnlistenFn[] = [];
@@ -45,17 +60,18 @@ export function useBeatmatcherLink() {
     );
   }
 
-  // Extrapolates the reference deck's continuous beat count forward from the last
-  // snapshot so playback stays sample-accurate between 50ms updates (see the phase
-  // extrapolation formula in the Beatmatcher broadcast spec).
-  function getBeatNow(): number | null {
+  // Snapshots only arrive every 50ms, so the beat count is extrapolated from the last one
+  // to stay accurate in between (see the phase extrapolation formula in the Beatmatcher
+  // broadcast spec).
+  function getBeat(): { beat: number; bpm: number } | null {
     const reference = playingDecks()[0];
     if (!reference || !latest) return null;
 
-    return (
-      reference.currentBeat! +
-      ((Date.now() - latest.epochMs) / 1000) * (reference.effectiveBpm! / 60)
-    );
+    const bpm = reference.effectiveBpm!;
+    return {
+      beat: reference.currentBeat! + ((Date.now() - latest.epochMs) / 1000) * (bpm / 60),
+      bpm
+    };
   }
 
   function getAverageBpm(): number | null {
@@ -64,23 +80,26 @@ export function useBeatmatcherLink() {
     return playing.reduce((sum, d) => sum + d.effectiveBpm!, 0) / playing.length;
   }
 
-  // Returns time/bpm values that, fed into the existing beatPeriod/beatPhase shader
-  // math in place of the free-running clock, land beat 0 exactly on the reference
-  // deck's real downbeat (the bpm/time pair cancels out in that math regardless of
-  // which bpm value is used, so feeding the average here doesn't shift the phase).
+  // Fed into the beatPeriod/beatPhase shader math in place of the free-running clock,
+  // this lands beat 0 exactly on the reference deck's real downbeat.
   function getBeatClock(): { time: number; bpm: number } | null {
-    const beatNow = getBeatNow();
+    const beat = getBeat();
     const bpm = getAverageBpm();
-    if (beatNow === null || bpm === null) return null;
+    if (beat === null || bpm === null) return null;
 
-    return { time: (beatNow * 60) / bpm, bpm };
+    return { time: (beat.beat * 60) / bpm, bpm };
   }
 
   onMounted(async () => {
     unlisteners = await Promise.all([
       listen<BeatmatcherStatePayload>('beatmatcher:state', (event) => {
         latest = event.payload;
-        decks.value = event.payload.decks;
+        const status = event.payload.decks.map(({ id, isPlaying, effectiveBpm }) => ({
+          id,
+          isPlaying,
+          effectiveBpm
+        }));
+        if (!sameDeckStatus(decks.value, status)) decks.value = status;
         connected.value = true;
       }),
       listen('beatmatcher:disconnected', () => {
@@ -96,5 +115,5 @@ export function useBeatmatcherLink() {
     unlisteners = [];
   });
 
-  return { connected, decks, getBeatClock, getBeatNow, getAverageBpm };
+  return { connected, decks, getBeatClock, getBeat, getAverageBpm };
 }

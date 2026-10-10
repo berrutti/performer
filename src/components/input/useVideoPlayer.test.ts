@@ -79,6 +79,29 @@ describe('useVideoPlayer', () => {
     cleanup();
   });
 
+  it('removes every can-play wait listener once one of them fires', async () => {
+    inputSourceRef.value = 'video';
+    videoPlaylist.value = makeItems(['/test.mp4']);
+    Object.defineProperty(videoElement, 'readyState', {
+      writable: true,
+      value: HTMLMediaElement.HAVE_NOTHING
+    });
+    const [result, cleanup] = setup();
+    const add = vi.spyOn(videoElement, 'addEventListener');
+    const remove = vi.spyOn(videoElement, 'removeEventListener');
+
+    const playing = result.handleVideoPlay(0);
+    videoElement.dispatchEvent(new Event('loadeddata'));
+    await playing;
+
+    for (const type of ['loadeddata', 'canplay', 'error']) {
+      const listener = add.mock.calls.find(([t]) => t === type)?.[1];
+      expect(listener).toBeDefined();
+      expect(remove).toHaveBeenCalledWith(type, listener);
+    }
+    cleanup();
+  });
+
   it('should pause video when playing', async () => {
     inputSourceRef.value = 'video';
     const [result, cleanup] = setup();
@@ -245,6 +268,23 @@ describe('useVideoPlayer', () => {
     cleanup();
   });
 
+  it('moves on to the next video when one ends, even though the browser reports pause first', async () => {
+    inputSourceRef.value = 'video';
+    videoPlaylist.value = makeItems(['/a.mp4', '/b.mp4']);
+    const [result, cleanup] = setup();
+    await result.handleVideoPlay(0);
+    vi.mocked(videoElement.play).mockClear();
+
+    videoElement.dispatchEvent(new Event('pause'));
+    videoElement.dispatchEvent(new Event('ended'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(result.loadedVideoIndex.value).toBe(1);
+    expect(videoElement.src).toContain('b.mp4');
+    expect(videoElement.play).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it('isVideoPlaying resets to false when emptied event fires', async () => {
     const [result, cleanup] = setup();
 
@@ -254,5 +294,123 @@ describe('useVideoPlayer', () => {
     videoElement.dispatchEvent(new Event('emptied'));
     expect(result.isVideoPlaying.value).toBe(false);
     cleanup();
+  });
+
+  describe('randomize', () => {
+    function makeStandby(state: 'ready' | 'missing' | 'undecodable' = 'ready'): HTMLVideoElement {
+      const standby = document.createElement('video');
+      standby.play = vi.fn().mockResolvedValue(undefined);
+      standby.pause = vi.fn();
+      Object.defineProperty(standby, 'paused', { writable: true, value: false });
+      const readyState = {
+        ready: HTMLMediaElement.HAVE_ENOUGH_DATA,
+        missing: HTMLMediaElement.HAVE_NOTHING,
+        undecodable: HTMLMediaElement.HAVE_METADATA
+      }[state];
+      Object.defineProperty(standby, 'readyState', { writable: true, value: readyState });
+      Object.defineProperty(standby, 'videoWidth', { value: state === 'missing' ? 0 : 640 });
+      if (state === 'missing') Object.defineProperty(standby, 'error', { value: { code: 4 } });
+      return standby;
+    }
+
+    beforeEach(() => {
+      inputSourceRef.value = 'video';
+      videoPlaylist.value = makeItems(['/a.mp4', '/b.mp4']);
+      randomizeRef1.value = makeStandby();
+      randomizeRef2.value = makeStandby();
+    });
+
+    it('pauses a playing main video while it runs and resumes it when it stops', async () => {
+      Object.defineProperty(videoElement, 'paused', { writable: true, value: false });
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      await result.applyVideoSnapshot({ videoIndex: 0, seekFraction: 0.5 });
+      expect(videoElement.pause).toHaveBeenCalledOnce();
+
+      result.onRandomizeDeactivated();
+      expect(videoElement.play).toHaveBeenCalledOnce();
+      cleanup();
+    });
+
+    it('keeps the shown video when the next one fails, and never preloads over it', async () => {
+      videoPlaylist.value = makeItems(['/a.mp4', '/b.mp4', '/c.mp4']);
+      randomizeRef2.value = makeStandby('missing');
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      expect(result.rendererVideoRef.value).toBe(randomizeRef1.value);
+      const shownSrc = randomizeRef1.value!.src;
+
+      void result.applyVideoSnapshot({ videoIndex: 0, seekFraction: 0.5 });
+      await new Promise((r) => setTimeout(r, 0));
+      void result.preloadUpcomingVideo({ videoIndex: 2, seekFraction: 0.5 });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(result.rendererVideoRef.value).toBe(randomizeRef1.value);
+      expect(randomizeRef1.value!.src).toBe(shownSrc);
+      expect(randomizeRef2.value!.src).toContain('c.mp4');
+      cleanup();
+    });
+
+    it('keeps the shown video when the next one loads but never decodes a frame', async () => {
+      randomizeRef2.value = makeStandby('undecodable');
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      const switching = result.applyVideoSnapshot({ videoIndex: 0, seekFraction: 0.5 });
+      await new Promise((r) => setTimeout(r, 0));
+      randomizeRef2.value!.dispatchEvent(new Event('seeked'));
+      await switching;
+
+      expect(result.rendererVideoRef.value).toBe(randomizeRef1.value);
+      cleanup();
+    });
+
+    it('play/pause acts on the video on screen, not the hidden main one', async () => {
+      const [result, cleanup] = setup();
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+
+      await result.handleVideoPlayPause();
+
+      expect(randomizeRef1.value!.pause).toHaveBeenCalledOnce();
+      expect(videoElement.pause).not.toHaveBeenCalled();
+      cleanup();
+    });
+
+    it('ignores play-state events from the standby that is not on screen', async () => {
+      const [result, cleanup] = setup();
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      randomizeRef1.value!.dispatchEvent(new Event('play'));
+      expect(result.isVideoPlaying.value).toBe(true);
+
+      randomizeRef2.value!.dispatchEvent(new Event('emptied'));
+      expect(result.isVideoPlaying.value).toBe(true);
+      cleanup();
+    });
+
+    it('keeps the main video playing when the first randomize video fails', async () => {
+      Object.defineProperty(videoElement, 'paused', { writable: true, value: false });
+      randomizeRef1.value = makeStandby('missing');
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+
+      expect(result.rendererVideoRef.value).toBe(videoElement);
+      expect(videoElement.pause).not.toHaveBeenCalled();
+      cleanup();
+    });
+
+    it('leaves a main video that was already paused paused when it stops', async () => {
+      Object.defineProperty(videoElement, 'paused', { writable: true, value: true });
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      result.onRandomizeDeactivated();
+
+      expect(videoElement.pause).not.toHaveBeenCalled();
+      expect(videoElement.play).not.toHaveBeenCalled();
+      cleanup();
+    });
   });
 });

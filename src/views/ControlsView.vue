@@ -34,7 +34,7 @@
         :midi-device-name="state.midiDeviceName"
         :midi-active-bank="state.midiActiveBank"
         :bpm="state.bpm"
-        :randomize-beat="state.randomizeBeat"
+        :randomize-phrase="state.randomizePhrase"
         :beatmatcher-avg-bpm="state.beatmatcherAvgBpm"
         :beatmatcher-connected="state.beatmatcherConnected"
         :beatmatcher-decks="state.beatmatcherDecks"
