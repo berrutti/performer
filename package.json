@@ -20,7 +20,8 @@
     "test": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "typecheck": "vue-tsc -b",
-    "ci": "yarn lint:ci && yarn format:check && yarn typecheck && yarn test --run"
+    "check:tauri-versions": "node scripts/check-tauri-versions.mjs",
+    "ci": "yarn check:tauri-versions && yarn lint:ci && yarn format:check && yarn typecheck && yarn test --run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
