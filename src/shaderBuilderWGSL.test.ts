@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { ShaderEffect, shaderEffects } from '@/utils';
+import { ShaderEffect, shaderEffects, buildEffectRecord } from '@/utils';
 import {
   MAPPING_EFFECTS,
+  mappingMask,
   UNIFORM_IDX,
   UNIFORMS_FLOAT_COUNT,
   blitShader,
@@ -44,6 +45,14 @@ describe('shaderBuilderWGSL', () => {
     const positions = MAPPING_EFFECTS.map((_, bit) => shader.indexOf(`(mask & ${1 << bit}u)`));
     expect(positions.every((position) => position > 0)).toBe(true);
     expect([...positions].sort((a, b) => b - a)).toEqual(positions);
+  });
+
+  it('gives each mapping effect its own bit in the mask the fused shader reads', () => {
+    const singleMasks = MAPPING_EFFECTS.map((effect) =>
+      mappingMask(buildEffectRecord((e) => e === effect))
+    );
+    expect(singleMasks).toEqual(MAPPING_EFFECTS.map((_, bit) => 1 << bit));
+    expect(mappingMask(buildEffectRecord(() => true))).toBe((1 << MAPPING_EFFECTS.length) - 1);
   });
 
   it('lays the uniform struct out in slot order, with a slot for every intensity and BPM sync', () => {

@@ -105,13 +105,11 @@ pub fn start(app: AppHandle) {
 mod tests {
     use super::*;
 
-    // From Beatmatcher 8.x, which renamed nudgeFactor, a deck field Performer doesn't read, to
-    // jogHoldFactor.
-    const SNAPSHOT: &str = r#"{"schemaVersion":1,"epochMs":1791561457807,"sampleRate":44100,"decks":[{"id":"A","isPlaying":true,"bpm":128.0,"beatOffsetSec":0.1,"positionSec":12.5,"playbackRate":1.0,"jogHoldFactor":1.0,"effectiveBpm":128.0,"currentBeat":26.45}]}"#;
+    const BEATMATCHER_8_SNAPSHOT: &str = r#"{"schemaVersion":1,"epochMs":1791561457807,"sampleRate":44100,"decks":[{"id":"A","isPlaying":true,"bpm":128.0,"beatOffsetSec":0.1,"positionSec":12.5,"playbackRate":1.0,"jogHoldFactor":1.0,"effectiveBpm":128.0,"currentBeat":26.45}]}"#;
 
     #[test]
     fn parses_snapshot_with_unread_deck_fields() {
-        let state: BeatmatcherState = serde_json::from_str(SNAPSHOT).unwrap();
+        let state: BeatmatcherState = serde_json::from_str(BEATMATCHER_8_SNAPSHOT).unwrap();
         assert_eq!(state.decks.len(), 1);
         assert_eq!(state.decks[0].effective_bpm, Some(128.0));
     }

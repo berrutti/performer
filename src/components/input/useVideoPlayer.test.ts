@@ -268,6 +268,19 @@ describe('useVideoPlayer', () => {
     cleanup();
   });
 
+  it('reloads on play even when the element already has that file, so a failed load is retried', async () => {
+    inputSourceRef.value = 'video';
+    videoPlaylist.value = makeItems(['/a.mp4']);
+    videoElement.src = videoPlaylist.value[0].src;
+    videoElement.load = vi.fn();
+    const [result, cleanup] = setup();
+
+    await result.handleVideoPlay(0);
+
+    expect(videoElement.load).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it('moves on to the next video when one ends, even though the browser reports pause first', async () => {
     inputSourceRef.value = 'video';
     videoPlaylist.value = makeItems(['/a.mp4', '/b.mp4']);
@@ -398,6 +411,38 @@ describe('useVideoPlayer', () => {
 
       expect(result.rendererVideoRef.value).toBe(videoElement);
       expect(videoElement.pause).not.toHaveBeenCalled();
+      cleanup();
+    });
+
+    it('shows the new video before its playback has started', async () => {
+      let finishPlay: () => void = () => {};
+      randomizeRef1.value!.play = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishPlay = resolve;
+          })
+      );
+      const [result, cleanup] = setup();
+
+      const switching = result.applyVideoSnapshot({ videoIndex: 1, seekFraction: 0.5 });
+      await vi.waitFor(() => expect(randomizeRef1.value!.play).toHaveBeenCalled());
+      expect(result.rendererVideoRef.value).toBe(randomizeRef1.value);
+
+      finishPlay();
+      await switching;
+      cleanup();
+    });
+
+    it('reloads a standby whose file failed before, in case its drive is back', async () => {
+      randomizeRef2.value = makeStandby('missing');
+      randomizeRef2.value.src = videoPlaylist.value[1].src;
+      randomizeRef2.value.load = vi.fn();
+      const [result, cleanup] = setup();
+
+      await result.applyVideoSnapshot({ videoIndex: 0, seekFraction: 0.5 });
+      await result.preloadUpcomingVideo({ videoIndex: 1, seekFraction: 0.5 });
+
+      expect(randomizeRef2.value.load).toHaveBeenCalled();
       cleanup();
     });
 

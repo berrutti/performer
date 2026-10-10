@@ -67,7 +67,7 @@ import { useVideoSource } from '@/components/input/useVideoSource';
 import { useMidi } from '@/composables/useMidi';
 import { useBeatmatcherLink } from '@/composables/useBeatmatcherLink';
 import { useWebGPURenderer } from '@/composables/useWebGPURenderer';
-import { useRandomizeMode } from '@/composables/useRandomizeMode';
+import { useRandomizeMode, beatGridClock } from '@/composables/useRandomizeMode';
 import { useFrameQualityGuard } from '@/composables/useFrameQualityGuard';
 import { CHANNEL_NAME, type FromControls, type FromMain } from '@/broadcast';
 import packageJson from '../../package.json';
@@ -155,14 +155,6 @@ const { onQualityData } = useFrameQualityGuard(
   }
 );
 
-// Shifts the free-running clock by less than a beat so the shaders' beat pulses land on the
-// randomize beat grid, the same beats the counter shows and the scenes switch on.
-function gridBeatClock(timeSec: number) {
-  const beatPeriod = 60 / bpm.value;
-  const originSec = randomize.getBeatGridOrigin() / 1000;
-  return { time: timeSec - (originSec % beatPeriod), bpm: bpm.value };
-}
-
 function handleRenderPerformance(renderFps: number, renderFrameTime: number) {
   fps.value = renderFps;
   frameTime.value = renderFrameTime;
@@ -175,7 +167,8 @@ useWebGPURenderer({
   effectIntensities: effectTransitions.renderingIntensities,
   bpmSyncEnabled: computed(() => effectTransitions.bpmSyncEnabled.value),
   bpm,
-  getBeatClock: (timeSec) => beatmatcher.getBeatClock() ?? gridBeatClock(timeSec),
+  getBeatClock: (timeSec) =>
+    beatmatcher.getBeatClock() ?? beatGridClock(timeSec, bpm.value, randomize.getBeatGridOrigin()),
   onRenderPerformance: handleRenderPerformance,
   onFrameQuality: (quality) => {
     if (randomize.isActive.value) onQualityData(quality);

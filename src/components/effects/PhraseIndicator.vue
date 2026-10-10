@@ -22,24 +22,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import type { RandomizePhrase } from '@/composables/useRandomizeMode';
+import { beatInPhrase, epochNow, type RandomizePhrase } from '@/composables/useRandomizeMode';
 
 const BEATS_PER_BAR = 4;
 
 const props = defineProps<{ phrase: RandomizePhrase }>();
 
-function currentBeat(): number {
-  const elapsed = performance.timeOrigin + performance.now() - props.phrase.startedAt;
-  return Math.min(Math.max(1, Math.floor(elapsed / props.phrase.beatMs) + 1), props.phrase.total);
-}
-
-// Checked every frame against this window's own clock, so beats tick exactly on time.
-const beat = ref(currentBeat());
+const beat = ref(beatInPhrase(props.phrase, epochNow()));
 let rafId = 0;
 
 function tick() {
-  const next = currentBeat();
-  if (next !== beat.value) beat.value = next;
+  beat.value = beatInPhrase(props.phrase, epochNow());
   rafId = requestAnimationFrame(tick);
 }
 
@@ -58,7 +51,6 @@ onUnmounted(() => cancelAnimationFrame(rafId));
   font-variant-numeric: tabular-nums;
 }
 
-/* As wide as the two-digit phrase lengths, so the cells don't shift when the beat reaches 10. */
 .phrase-beat {
   display: inline-block;
   min-width: 2ch;

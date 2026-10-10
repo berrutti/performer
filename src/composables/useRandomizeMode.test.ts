@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref } from 'vue';
 import { withSetup } from '@/test/utils';
-import { useRandomizeMode } from './useRandomizeMode';
+import { useRandomizeMode, beatInPhrase, beatGridClock } from './useRandomizeMode';
 import { ShaderEffect } from '@/utils';
 import type { VideoPlaylistItem } from '@/components/input/useVideoPlaylist';
 
@@ -44,8 +44,8 @@ describe('useRandomizeMode', () => {
     );
     result.toggle();
     onApply.mockClear();
-    // at 60 bpm the longest wait is 32 beats = 32 s, so advancing past that guarantees firing
-    vi.advanceTimersByTime(33000);
+    const longestPhraseMs = 32 * 1000;
+    vi.advanceTimersByTime(longestPhraseMs + 1000);
     expect(onApply).toHaveBeenCalled();
     cleanup();
   });
@@ -182,9 +182,7 @@ describe('useRandomizeMode', () => {
       useRandomizeMode(ref(90), ref(makePlaylist(2)), ref(0), vi.fn(), undefined, () => beatAt(2))
     );
     result.toggle();
-    // The deck's 120 BPM, not the 90 set manually.
     expect(result.phrase.value!.beatMs).toBe(500);
-    // Beat 2 of a phrase that started on beat 0, so two beats ago.
     expect(result.phrase.value!.startedAt).toBeCloseTo(
       performance.timeOrigin + performance.now() - 1000,
       0
@@ -324,5 +322,29 @@ describe('useRandomizeMode', () => {
     const unique = new Set(indices);
     expect(unique.size).toBeGreaterThan(1);
     cleanup();
+  });
+});
+
+describe('beatInPhrase', () => {
+  const phrase = { startedAt: 10000, beatMs: 500, total: 16 };
+
+  it('counts beats from 1 at the phrase start', () => {
+    expect(beatInPhrase(phrase, 10000)).toBe(1);
+    expect(beatInPhrase(phrase, 10499)).toBe(1);
+    expect(beatInPhrase(phrase, 10500)).toBe(2);
+  });
+
+  it('stays within the phrase when the clock is outside it', () => {
+    expect(beatInPhrase(phrase, 9000)).toBe(1);
+    expect(beatInPhrase(phrase, 99999)).toBe(16);
+  });
+});
+
+describe('beatGridClock', () => {
+  it('lands the shader beats on the randomize beat grid', () => {
+    const gridOriginMs = 1234;
+    const clock = beatGridClock(gridOriginMs / 1000 + 3 * 0.5, 120, gridOriginMs);
+    const beats = (clock.time * clock.bpm) / 60;
+    expect(Math.abs(beats - Math.round(beats))).toBeLessThan(1e-9);
   });
 });

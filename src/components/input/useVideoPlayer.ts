@@ -22,6 +22,49 @@ export interface UseVideoPlayerOptions {
   isMuted: Ref<boolean>;
 }
 
+function waitForCanPlay(video: HTMLVideoElement): Promise<boolean> {
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      for (const type of CANPLAY_EVENTS) video.removeEventListener(type, done);
+      resolve(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+    };
+    const timer = setTimeout(done, CANPLAY_TIMEOUT_MS);
+    for (const type of CANPLAY_EVENTS) video.addEventListener(type, done);
+  });
+}
+
+function waitForVideoMetadata(video: HTMLVideoElement): Promise<boolean> {
+  if (video.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve(true);
+  if (video.error) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const settle = (loaded: boolean) => {
+      clearTimeout(timer);
+      video.removeEventListener('loadedmetadata', onLoaded);
+      video.removeEventListener('error', onFailed);
+      resolve(loaded);
+    };
+    const onLoaded = () => settle(true);
+    const onFailed = () => settle(false);
+    const timer = setTimeout(onFailed, METADATA_TIMEOUT_MS);
+    video.addEventListener('loadedmetadata', onLoaded);
+    video.addEventListener('error', onFailed);
+  });
+}
+
+async function startPlayback(video: HTMLVideoElement): Promise<boolean> {
+  try {
+    await video.play();
+    return true;
+  } catch (err) {
+    if (!(err instanceof DOMException && err.name === 'AbortError')) {
+      console.error('Video playback failed:', err);
+    }
+    return false;
+  }
+}
+
 export function useVideoPlayer(options: UseVideoPlayerOptions) {
   const {
     videoRef,
@@ -41,8 +84,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
   const rendererVideoRef = shallowRef<HTMLVideoElement | null>(null);
   const randomizeActive = ref(false);
   let resumeMainAfterRandomize = false;
-  // Preloading waits for the in-flight switch, so it always targets the standby that is
-  // not on screen: a switch that fails to load can never get the shown video reloaded.
   let applying: Promise<void> = Promise.resolve();
 
   watch(
@@ -62,51 +103,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
     }
   );
 
-  function waitForCanPlay(video: HTMLVideoElement): Promise<boolean> {
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve(true);
-    return new Promise<boolean>((resolve) => {
-      // Listeners that never fire (usually 'error') would otherwise pile up on the element
-      // with every video change.
-      const done = () => {
-        clearTimeout(timer);
-        for (const type of CANPLAY_EVENTS) video.removeEventListener(type, done);
-        resolve(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
-      };
-      const timer = setTimeout(done, CANPLAY_TIMEOUT_MS);
-      for (const type of CANPLAY_EVENTS) video.addEventListener(type, done);
-    });
-  }
-
-  function waitForVideoMetadata(video: HTMLVideoElement): Promise<boolean> {
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve(true);
-    if (video.error) return Promise.resolve(false);
-    return new Promise((resolve) => {
-      const settle = (loaded: boolean) => {
-        clearTimeout(timer);
-        video.removeEventListener('loadedmetadata', onLoaded);
-        video.removeEventListener('error', onFailed);
-        resolve(loaded);
-      };
-      const onLoaded = () => settle(true);
-      const onFailed = () => settle(false);
-      const timer = setTimeout(onFailed, METADATA_TIMEOUT_MS);
-      video.addEventListener('loadedmetadata', onLoaded);
-      video.addEventListener('error', onFailed);
-    });
-  }
-
-  async function startPlayback(video: HTMLVideoElement): Promise<boolean> {
-    try {
-      await video.play();
-      return true;
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        console.error('Video playback failed:', err);
-      }
-      return false;
-    }
-  }
-
   async function handleVideoPlay(index: number) {
     selectedVideoIndex.value = index;
     loadedVideoIndex.value = index;
@@ -114,9 +110,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
     const video = videoRef.value;
     const item = videoPlaylist.value[index];
     if (!video || !item) return;
-    // Always reload: if the previous attempt left an error state,
-    // video.src still matches so a conditional check would skip the reload,
-    // leaving the element stuck at readyState 0 with no events firing.
     video.src = item.src;
     video.load();
     await waitForCanPlay(video);
@@ -125,8 +118,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
 
   async function handleVideoPlayPause() {
     if (inputSource.value !== 'video') return;
-    // During randomize the picture comes from a standby element, so play/pause acts on that;
-    // the hidden main video stays paused until randomize stops.
     const shown = rendererVideoRef.value;
     if (randomizeActive.value && shown && shown !== videoRef.value) {
       if (shown.paused) await startPlayback(shown);
@@ -186,7 +177,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
         video.pause();
         video.removeAttribute('src');
         video.load();
-        // isVideoPlaying will be set false by the pause event
       }
     }
     loadedVideoIndex.value = newLoadedIndex;
@@ -219,14 +209,10 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
     const standby = idleStandby();
     const item = videoPlaylist.value[snapshot.videoIndex];
     if (!randomizeActive.value || !standby || !item) return;
-    // An element left in an error state is reloaded too, so a file on a drive that has
-    // been reconnected since gets another chance.
     if (standby.src !== item.src || standby.error) {
       standby.src = item.src;
       standby.load();
     }
-    // Seek to the exact play position so the browser buffers the right segment,
-    // not from the beginning of a potentially large file.
     if (!(await waitForVideoMetadata(standby))) return;
     if (standby.duration > 0) {
       standby.currentTime = snapshot.seekFraction * standby.duration;
@@ -247,9 +233,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
     const item = videoPlaylist.value[snapshot.videoIndex];
     if (!standby || !item) return;
 
-    // A file that is missing, unreadable, has no video track or never decodes a frame
-    // (VP9 WebM in WKWebView) keeps the current video on screen for this scene instead of
-    // switching to a blank element.
     if (standby.src !== item.src || standby.error) standby.src = item.src;
     const hasVideo = (await waitForVideoMetadata(standby)) && standby.videoWidth > 0;
     if (!hasVideo || !randomizeActive.value) return;
@@ -261,28 +244,17 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
 
     standby.muted = isMuted.value;
 
-    // The main video is hidden while randomize plays the standby elements, so it is
-    // paused instead of decoding in the background, and resumed when randomize stops.
     const main = videoRef.value;
     if (rendererVideoRef.value === main && main && !main.paused) {
       main.pause();
       resumeMainAfterRandomize = true;
     }
 
-    // Swap renderer before awaiting play so the seeked frame shows immediately.
     rendererVideoRef.value = standby;
-
-    try {
-      await standby.play();
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        console.error('Video playback failed:', err);
-      }
-    }
+    await startPlayback(standby);
 
     loadedVideoIndex.value = snapshot.videoIndex;
     selectedVideoIndex.value = snapshot.videoIndex;
-    // isVideoPlaying will be set by the play event on the standby element
   }
 
   function onRandomizeDeactivated() {
@@ -302,8 +274,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
     isVideoPlaying.value = !(videoRef.value?.paused ?? true);
   }
 
-  // Only the element on screen decides the play state: during randomize, the standby being
-  // reloaded in the background fires pause and emptied events that would otherwise flip it off.
   function setPlayingFrom(event: Event, playing: boolean) {
     if (event.target === rendererVideoRef.value) isVideoPlaying.value = playing;
   }
@@ -327,8 +297,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
   function onVideoEnded() {
     if (inputSource.value !== 'video' || videoPausedManually.value) return;
     const count = videoPlaylist.value.length;
-    // Not handleNextVideo: the browser fires pause before ended, so isVideoPlaying is already
-    // false here and stepping would only move the playlist highlight.
     if (count > 1) void handleVideoPlay((loadedVideoIndex.value + 1) % count);
   }
 
@@ -375,8 +343,6 @@ export function useVideoPlayer(options: UseVideoPlayerOptions) {
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('durationchange', onDurationChange);
     }
-    // Standby elements need play/pause/error/emptied so isVideoPlaying stays
-    // event-driven when randomize mode is active and playing on a standby element.
     if (randomizeRef1.value) attachPlaybackListeners(randomizeRef1.value);
     if (randomizeRef2.value) attachPlaybackListeners(randomizeRef2.value);
   });

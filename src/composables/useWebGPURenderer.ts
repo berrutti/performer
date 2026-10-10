@@ -6,21 +6,21 @@ import {
   passthroughShader,
   createEffectShaderWGSL,
   createMappingShaderWGSL,
-  MAPPING_EFFECTS,
+  mappingMask,
   rdStepShader,
   rdCompositeShader,
   UNIFORMS_FLOAT_COUNT,
   UNIFORM_IDX
 } from '@/shaderBuilderWGSL';
 
+type Channels = [number, number, number];
+
 export interface FrameStats {
   mean: number;
   variance: number;
-  channels: [number, number, number];
+  channels: Channels;
 }
 
-// The source is the video right after the blit, so effects can be judged against how bright
-// the footage itself is.
 export interface FrameQuality {
   source: FrameStats;
   output: FrameStats;
@@ -33,9 +33,6 @@ export interface UseWebGPURendererOptions {
   effectIntensities: ComputedRef<Record<ShaderEffect, number>>;
   bpmSyncEnabled: ComputedRef<Record<ShaderEffect, boolean>>;
   bpm: Ref<number>;
-  // A returned time/bpm pair replaces the free-running clock and manual bpm, so the
-  // shader's beatPeriod/beatPhase math phase-locks to another clock (Beatmatcher, or the
-  // randomize beat grid).
   getBeatClock?: (timeSec: number) => { time: number; bpm: number } | null;
   onRenderPerformance?: (fps: number, frameTime: number) => void;
   onVideoNotRenderable?: () => void;
@@ -50,8 +47,6 @@ export function useWebGPURenderer(options: UseWebGPURendererOptions) {
   async function start() {
     cleanup =
       (await initRenderer(options, () => {
-        // The GPU process can reset (driver fault, memory pressure); rebuilding beats a canvas
-        // that stays frozen until the app is restarted.
         cleanup?.();
         cleanup = null;
         if (!unmounted) void start();
@@ -70,6 +65,7 @@ const TEXTURE_FORMAT: GPUTextureFormat = 'rgba8unorm';
 // updates round away, which stalls the pattern or makes it blocky.
 const RD_TEXTURE_FORMAT: GPUTextureFormat = 'rgba16float';
 export const RD_STEPS_PER_FRAME = 4;
+const BLACK: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
 
 const QUAD_VERTICES = new Float32Array([
   -1, -1, 0, 1, 1, -1, 1, 1, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 1, 1, 1, 1, 1, 0
@@ -77,26 +73,21 @@ const QUAD_VERTICES = new Float32Array([
 
 const FRAME_RING_SIZE = 128;
 
-// Sampled over the whole frame so a blowout anywhere is caught, not just at the center. Rows
-// are padded to the 256 bytes that copyTextureToBuffer requires.
+const COPY_ROW_ALIGNMENT = 256;
 const PROBE_W = 32;
 const PROBE_H = 18;
-const PROBE_ROW_BYTES = 256;
+const PROBE_ROW_BYTES = Math.ceil((PROBE_W * 4) / COPY_ROW_ALIGNMENT) * COPY_ROW_ALIGNMENT;
 const PROBE_BYTES = PROBE_ROW_BYTES * PROBE_H;
-// Frequent enough for the quality guard to react within a beat, sparse enough for feedback
-// effects to show the result of its previous step.
 const QUALITY_PROBE_FRAMES = 15;
-// WebKit garbles some videos on the way into WebGPU (10-bit HEVC shows wrong colors and
-// blocks) while decoding them fine for a 2D canvas, so the two are compared. The gap must be
-// far beyond normal color-conversion differences, and hold for several probes in a row so a
-// frame change between the two reads can't trigger it.
+// WebKit garbles some videos on the way into WebGPU (10-bit HEVC) while decoding them fine
+// for a 2D canvas, so the two are compared.
 const GARBLED_CHANNEL_GAP = 0.2;
 const GARBLED_PROBES = 3;
 
 function frameStats(data: Uint8ClampedArray | Uint8Array, offset: number, rowBytes: number) {
   let sum = 0;
   let sumSq = 0;
-  const channels: [number, number, number] = [0, 0, 0];
+  const channels: Channels = [0, 0, 0];
   for (let y = 0; y < PROBE_H; y++) {
     for (let x = 0; x < PROBE_W; x++) {
       const i = offset + y * rowBytes + x * 4;
@@ -113,15 +104,30 @@ function frameStats(data: Uint8ClampedArray | Uint8Array, offset: number, rowByt
   return {
     mean,
     variance: Math.max(0, sumSq / n - mean * mean),
-    channels: channels.map((c) => c / n / 255) as [number, number, number]
+    channels: channels.map((c) => c / n / 255) as Channels
   };
 }
 
-export function channelsDisagree(
-  a: [number, number, number],
-  b: [number, number, number]
-): boolean {
+export function channelsDisagree(a: Channels, b: Channels): boolean {
   return a.some((value, i) => Math.abs(value - b[i]) > GARBLED_CHANNEL_GAP);
+}
+
+export function createGarbledDetector(onGarbled: () => void) {
+  let streak = 0;
+  let reported = false;
+  return {
+    reset() {
+      streak = 0;
+      reported = false;
+    },
+    check(received: Channels, reference: Channels) {
+      streak = channelsDisagree(received, reference) ? streak + 1 : 0;
+      if (streak >= GARBLED_PROBES && !reported) {
+        reported = true;
+        onGarbled();
+      }
+    }
+  };
 }
 
 export function computeCrop(
@@ -168,7 +174,6 @@ async function acquireGPUContext(canvas: HTMLCanvasElement): Promise<{
   return { device, context, canvasFormat };
 }
 
-// Built once at init, so nothing here may depend on canvas size (that lives in updateTargets).
 function createGPUResources(device: GPUDevice, canvasFormat: GPUTextureFormat) {
   const vertexBuffer = device.createBuffer({
     size: QUAD_VERTICES.byteLength,
@@ -190,8 +195,6 @@ function createGPUResources(device: GPUDevice, canvasFormat: GPUTextureFormat) {
   });
   const uniformData = new Float32Array(UNIFORMS_FLOAT_COUNT);
 
-  // Mirror-repeat so effects that sample past the frame edge reflect the picture instead of
-  // smearing the outermost pixels.
   const sampler = device.createSampler({
     minFilter: 'linear',
     magFilter: 'linear',
@@ -310,12 +313,7 @@ function writeUniforms(
   data[UNIFORM_IDX.time] = beatClock?.time ?? timeSec;
   data[UNIFORM_IDX.bpm] = beatClock?.bpm ?? bpmRef.value;
 
-  const active = options.activeEffects.value;
-  let mappingMask = 0;
-  MAPPING_EFFECTS.forEach((effect, bit) => {
-    if (active[effect]) mappingMask |= 1 << bit;
-  });
-  data[UNIFORM_IDX.mappingMask] = mappingMask;
+  data[UNIFORM_IDX.mappingMask] = mappingMask(options.activeEffects.value);
 
   for (const effect of Object.values(ShaderEffect)) {
     const iIdx = UNIFORM_IDX.intensity[effect];
@@ -351,15 +349,9 @@ async function initRenderer(
   const { externalTextureBGL, textureBGL, feedbackTextureBGL } = res.bgls;
   const { uniformBindGroup, pipelines } = res;
 
-  // Three render targets rotate each frame so the previous frame's output (the history
-  // texture for feedback effects) never has to be copied: one holds it while the other
-  // two ping-pong for the current frame's effect chain.
   let renderTargets: [GPUTexture, GPUTexture, GPUTexture] | null = null;
-  // Views are created once per resize; creating them per pass would allocate
-  // GPU objects every frame.
   let rtViews: [GPUTextureView, GPUTextureView, GPUTextureView] | null = null;
   let rtBindGroups: [GPUBindGroup, GPUBindGroup, GPUBindGroup] | null = null;
-  // null where src === hist, since the history texture is never in the ping-pong pair.
   let historyBindGroups: (GPUBindGroup | null)[][] | null = null;
   let rdTextures: [GPUTexture, GPUTexture] | null = null;
   let rdViews: [GPUTextureView, GPUTextureView] | null = null;
@@ -498,16 +490,38 @@ async function initRenderer(
     }
   }
 
-  function encodeProbe(encoder: GPUCommandEncoder, source: GPUBindGroup, target: GPUTextureView) {
+  function encodeFullscreenPass(
+    encoder: GPUCommandEncoder,
+    pipeline: GPURenderPipeline,
+    bindGroup: GPUBindGroup,
+    target: GPUTextureView
+  ) {
     const pass = encoder.beginRenderPass({
-      colorAttachments: [{ view: target, loadOp: 'clear', storeOp: 'store' }]
+      colorAttachments: [{ view: target, loadOp: 'clear', storeOp: 'store', clearValue: BLACK }]
     });
-    pass.setPipeline(pipelines.probe);
-    pass.setBindGroup(0, source);
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
     pass.setBindGroup(1, uniformBindGroup);
     pass.setVertexBuffer(0, vertexBuffer);
     pass.draw(6);
     pass.end();
+  }
+
+  function clearCanvas() {
+    const encoder = device.createCommandEncoder();
+    encoder
+      .beginRenderPass({
+        colorAttachments: [
+          {
+            view: context.getCurrentTexture().createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: BLACK
+          }
+        ]
+      })
+      .end();
+    device.queue.submit([encoder.finish()]);
   }
 
   updateTargets();
@@ -532,17 +546,15 @@ async function initRenderer(
   let qualityFrameCount = 0;
   let qualityReadbackPending = false;
   let rdWasActive = false;
-  let garbledStreak = 0;
-  let garbledReported = false;
   let rafId = 0;
+  const garbled = createGarbledDetector(() => options.onVideoNotRenderable?.());
 
   const referenceCanvas = document.createElement('canvas');
   referenceCanvas.width = PROBE_W;
   referenceCanvas.height = PROBE_H;
   const referenceContext = referenceCanvas.getContext('2d', { willReadFrequently: true });
 
-  // The same crop as the blit, read through the 2D canvas path, which decodes correctly.
-  function sampleReference(video: HTMLVideoElement): [number, number, number] | null {
+  function sampleReference(video: HTMLVideoElement): Channels | null {
     if (!referenceContext || video.videoWidth === 0) return null;
     try {
       const uMin = uniformData[UNIFORM_IDX.cropUMin];
@@ -565,15 +577,7 @@ async function initRenderer(
     }
   }
 
-  function checkGarbled(received: [number, number, number], reference: [number, number, number]) {
-    garbledStreak = channelsDisagree(received, reference) ? garbledStreak + 1 : 0;
-    if (garbledStreak >= GARBLED_PROBES && !garbledReported) {
-      garbledReported = true;
-      options.onVideoNotRenderable?.();
-    }
-  }
-
-  function readProbe(reference: [number, number, number] | null) {
+  function readProbe(reference: Channels | null) {
     qualityReadbackPending = true;
     probeBuffer
       .mapAsync(GPUMapMode.READ)
@@ -585,7 +589,7 @@ async function initRenderer(
         };
         probeBuffer.unmap();
         qualityReadbackPending = false;
-        if (reference) checkGarbled(quality.source.channels, reference);
+        if (reference) garbled.check(quality.source.channels, reference);
         options.onFrameQuality?.(quality);
       })
       .catch(() => {
@@ -600,43 +604,14 @@ async function initRenderer(
       lastVideo = video;
       videoWasReady = false;
       notifiedNotRenderable = false;
-      garbledStreak = 0;
-      garbledReported = false;
+      garbled.reset();
       updateTargets();
-      if (canvas && context) {
-        const enc = device.createCommandEncoder();
-        const pass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: context.getCurrentTexture().createView(),
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 }
-            }
-          ]
-        });
-        pass.end();
-        device.queue.submit([enc.finish()]);
-      }
+      clearCanvas();
     }
 
     const videoReady = !!video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     if (!videoReady) {
-      if (videoWasReady && canvas && context) {
-        const enc = device.createCommandEncoder();
-        const pass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: context.getCurrentTexture().createView(),
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 }
-            }
-          ]
-        });
-        pass.end();
-        device.queue.submit([enc.finish()]);
-      }
+      if (videoWasReady) clearCanvas();
       videoWasReady = false;
       rafId = requestAnimationFrame(renderFrame);
       return;
@@ -670,8 +645,6 @@ async function initRenderer(
     const activeList = Object.values(ShaderEffect).filter((e) => options.activeEffects.value[e]);
     const enc = device.createCommandEncoder();
 
-    // A fresh pattern each time RD switches on; the old one would come back already covering
-    // the whole screen.
     const rdActive = options.activeEffects.value[ShaderEffect.REACTION_DIFFUSION];
     if (rdActive && !rdWasActive) encodeReactionDiffusionReset(enc);
     rdWasActive = rdActive;
@@ -686,32 +659,15 @@ async function initRenderer(
     const ppA = pingPong[0];
     const ppB = pingPong[1];
 
-    {
-      const blitBG = device.createBindGroup({
-        layout: externalTextureBGL,
-        entries: [
-          { binding: 0, resource: externalTexture },
-          { binding: 1, resource: sampler }
-        ]
-      });
-      const blitPass = enc.beginRenderPass({
-        colorAttachments: [
-          {
-            view: rtViews[ppA],
-            loadOp: 'clear',
-            storeOp: 'store',
-            clearValue: { r: 0, g: 0, b: 0, a: 1 }
-          }
-        ]
-      });
-      blitPass.setPipeline(pipelines.blit);
-      blitPass.setBindGroup(0, blitBG);
-      blitPass.setBindGroup(1, uniformBindGroup);
-      blitPass.setVertexBuffer(0, vertexBuffer);
-      blitPass.draw(6);
-      blitPass.end();
-      if (probing) encodeProbe(enc, rtBindGroups[ppA], probeViews.source);
-    }
+    const blitBG = device.createBindGroup({
+      layout: externalTextureBGL,
+      entries: [
+        { binding: 0, resource: externalTexture },
+        { binding: 1, resource: sampler }
+      ]
+    });
+    encodeFullscreenPass(enc, pipelines.blit, blitBG, rtViews[ppA]);
+    if (probing) encodeFullscreenPass(enc, pipelines.probe, rtBindGroups[ppA], probeViews.source);
 
     let srcIdx = ppA;
     let rdSrcIdx = 0;
@@ -731,82 +687,29 @@ async function initRenderer(
       if (effect === ShaderEffect.REACTION_DIFFUSION && rdViews) {
         for (let iter = 0; iter < RD_STEPS_PER_FRAME; iter++) {
           const rdDst = (1 - rdSrcIdx) as 0 | 1;
-          const stepBG = rdStepBGs![rdSrcIdx][srcIdx];
-          const stepPass = enc.beginRenderPass({
-            // Every pixel is overwritten, so 'clear' instead of 'load' spares tile-based
-            // (Apple) GPUs from reading the whole texture back from memory on every step.
-            colorAttachments: [{ view: rdViews[rdDst], loadOp: 'clear', storeOp: 'store' }]
-          });
-          stepPass.setPipeline(pipelines.rdStep);
-          stepPass.setBindGroup(0, stepBG);
-          stepPass.setBindGroup(1, uniformBindGroup);
-          stepPass.setVertexBuffer(0, vertexBuffer);
-          stepPass.draw(6);
-          stepPass.end();
+          encodeFullscreenPass(enc, pipelines.rdStep, rdStepBGs![rdSrcIdx][srcIdx], rdViews[rdDst]);
           rdSrcIdx = rdDst;
         }
         historyIdx = srcIdx;
-        const rdCompBG = rdCompBGs![srcIdx];
-        const rdCompPass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: rtViews[dstIdx],
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 }
-            }
-          ]
-        });
-        rdCompPass.setPipeline(pipelines.rdComposite);
-        rdCompPass.setBindGroup(0, rdCompBG);
-        rdCompPass.setBindGroup(1, uniformBindGroup);
-        rdCompPass.setVertexBuffer(0, vertexBuffer);
-        rdCompPass.draw(6);
-        rdCompPass.end();
-        srcIdx = dstIdx;
+        encodeFullscreenPass(enc, pipelines.rdComposite, rdCompBGs![srcIdx], rtViews[dstIdx]);
       } else {
         const pipeline = stage === 'mapping' ? pipelines.mapping : pipelines.effects.get(effect)!;
         const bg =
           stage === 'feedback' ? historyBindGroups![srcIdx][histIdx]! : rtBindGroups![srcIdx];
-        const effectPass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: rtViews[dstIdx],
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 }
-            }
-          ]
-        });
-        effectPass.setPipeline(pipeline);
-        effectPass.setBindGroup(0, bg);
-        effectPass.setBindGroup(1, uniformBindGroup);
-        effectPass.setVertexBuffer(0, vertexBuffer);
-        effectPass.draw(6);
-        effectPass.end();
-        srcIdx = dstIdx;
+        encodeFullscreenPass(enc, pipeline, bg, rtViews[dstIdx]);
       }
+      srcIdx = dstIdx;
     }
 
-    const finalPass = enc.beginRenderPass({
-      colorAttachments: [
-        {
-          view: context.getCurrentTexture().createView(),
-          loadOp: 'clear',
-          storeOp: 'store',
-          clearValue: { r: 0, g: 0, b: 0, a: 1 }
-        }
-      ]
-    });
-    finalPass.setPipeline(pipelines.passthrough);
-    finalPass.setBindGroup(0, rtBindGroups![srcIdx]);
-    finalPass.setBindGroup(1, uniformBindGroup);
-    finalPass.setVertexBuffer(0, vertexBuffer);
-    finalPass.draw(6);
-    finalPass.end();
+    encodeFullscreenPass(
+      enc,
+      pipelines.passthrough,
+      rtBindGroups[srcIdx],
+      context.getCurrentTexture().createView()
+    );
 
     if (probing) {
-      encodeProbe(enc, rtBindGroups[srcIdx], probeViews.output);
+      encodeFullscreenPass(enc, pipelines.probe, rtBindGroups[srcIdx], probeViews.output);
       const layout = { buffer: probeBuffer, bytesPerRow: PROBE_ROW_BYTES, rowsPerImage: PROBE_H };
       enc.copyTextureToBuffer({ texture: probeTextures.source }, layout, [PROBE_W, PROBE_H]);
       enc.copyTextureToBuffer(

@@ -1,44 +1,48 @@
 import { ShaderEffect, shaderEffects } from '@/utils';
 
-let _next = 7;
+const FIXED_UNIFORMS = [
+  'time',
+  'bpm',
+  'cropUMin',
+  'cropUMax',
+  'cropVMin',
+  'cropVMax',
+  'mappingMask'
+] as const;
+const INTENSITY_EFFECTS = Object.values(ShaderEffect).filter(
+  (e) => shaderEffects[e].intensity !== undefined
+);
+const BPM_SYNC_EFFECTS = Object.values(ShaderEffect).filter((e) => shaderEffects[e].bpmSync);
+const UNIFORM_FIELDS = [
+  ...FIXED_UNIFORMS,
+  ...INTENSITY_EFFECTS.map((e) => `intensity_${e}`),
+  ...BPM_SYNC_EFFECTS.map((e) => `bpmSync_${e}`)
+];
 
-const _intensityIdx: Partial<Record<ShaderEffect, number>> = {};
-for (const effect of Object.values(ShaderEffect)) {
-  if (shaderEffects[effect].intensity !== undefined) _intensityIdx[effect] = _next++;
+function slotsFrom<K extends string>(names: readonly K[], first: number): Record<K, number> {
+  return Object.fromEntries(names.map((name, i) => [name, first + i])) as Record<K, number>;
 }
 
-const _bpmSyncIdx: Partial<Record<ShaderEffect, number>> = {};
-for (const effect of Object.values(ShaderEffect)) {
-  if (shaderEffects[effect].bpmSync) _bpmSyncIdx[effect] = _next++;
-}
+const intensitySlots: Partial<Record<ShaderEffect, number>> = slotsFrom(
+  INTENSITY_EFFECTS,
+  FIXED_UNIFORMS.length
+);
+const bpmSyncSlots: Partial<Record<ShaderEffect, number>> = slotsFrom(
+  BPM_SYNC_EFFECTS,
+  FIXED_UNIFORMS.length + INTENSITY_EFFECTS.length
+);
 
-export const UNIFORMS_FLOAT_COUNT = _next;
+export const UNIFORMS_FLOAT_COUNT = UNIFORM_FIELDS.length;
 
 export const UNIFORM_IDX = {
-  time: 0,
-  bpm: 1,
-  cropUMin: 2,
-  cropUMax: 3,
-  cropVMin: 4,
-  cropVMax: 5,
-  mappingMask: 6,
-  intensity: _intensityIdx,
-  bpmSync: _bpmSyncIdx
+  ...slotsFrom(FIXED_UNIFORMS, 0),
+  intensity: intensitySlots,
+  bpmSync: bpmSyncSlots
 };
-
-const _intensityFields = Object.keys(_intensityIdx)
-  .map((e) => `  intensity_${e}: f32,`)
-  .join('\n');
-const _bpmSyncFields = Object.keys(_bpmSyncIdx)
-  .map((e) => `  bpmSync_${e}: f32,`)
-  .join('\n');
 
 const UNIFORMS_STRUCT = /* wgsl */ `
 struct Uniforms {
-  time: f32, bpm: f32, cropUMin: f32, cropUMax: f32,
-  cropVMin: f32, cropVMax: f32, mappingMask: f32,
-${_intensityFields}
-${_bpmSyncFields}
+${UNIFORM_FIELDS.map((field) => `  ${field}: f32,`).join('\n')}
 }`;
 
 export const vertexShader = /* wgsl */ `
@@ -80,8 +84,6 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
 }
 `;
 
-// Beat phases use fract(time / beatPeriod), not %: WGSL's % keeps the sign, so a negative
-// clock (a Beatmatcher deck before its first beat) would make the exp(-beatPhase * k) pulses explode.
 const effectWGSL: Record<ShaderEffect, string> = {
   [ShaderEffect.INVERT]: `
     color = vec4f(vec3f(1.0) - color.rgb, color.a);
@@ -125,9 +127,6 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let dims = vec2f(textureDimensions(u_image));
     let aspect = vec2f(dims.x / dims.y, 1.0);
 
-    // Three mirrors in an equilateral triangle, like a real kaleidoscope tube, so the
-    // reflections tile the whole screen. Measured in aspect-true units so every triangle
-    // keeps its true angles on a wide screen.
     let size = 0.42 + 0.06 * sin(t * 0.11) - beatPulse * 0.05;
     let spin = t * 0.05 + beatPulse * 0.15;
     var p = (uv - vec2f(0.5)) * aspect;
@@ -141,15 +140,12 @@ const effectWGSL: Record<ShaderEffect, string> = {
       p -= 2.0 * min(dot(p - corner, mirror3), 0.0) * mirror3;
     }
 
-    // The object chamber drifts, turns and zooms through the video on its own, so what the
-    // mirrors reflect keeps changing instead of the same picture just spinning.
     var q = p - vec2f(size * 0.5, size * 0.2886751);
     let turn = -t * 0.07;
     q = vec2f(q.x * cos(turn) - q.y * sin(turn), q.x * sin(turn) + q.y * cos(turn));
     let zoom = 1.6 + 0.3 * sin(t * 0.09);
     let drift = vec2f(sin(t * 0.07), cos(t * 0.05)) * 0.25;
     q = q * zoom / aspect + vec2f(0.5) + drift;
-    // Mirrored repeat rather than fract(), so running off the frame reflects instead of seaming.
     uv = 1.0 - abs(1.0 - fract(q * 0.5) * 2.0);
   `,
 
@@ -158,22 +154,16 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let beatPhase = fract(uniforms.time / beatPeriod);
     let pulse = exp(-beatPhase * 6.0) * 0.5 * uniforms.bpmSync_DISPLACE;
     let timeOffset = uniforms.time * 0.2;
-    // Centered on zero so the picture wobbles in place rather than shifting up and left, and
-    // scaled by intensity once so the slider responds evenly.
     let displaceAmount = uniforms.intensity_DISPLACE * 0.04 * (1.0 + pulse);
     uv += vec2f(sin((uv.y + timeOffset) * 10.0), sin((uv.x + timeOffset) * 10.0)) * displaceAmount;
   `,
 
   [ShaderEffect.SWIRL]: `
     let beats = (uniforms.time * uniforms.bpm) / 60.0;
-    // Without BPM sync the twist still swings on its own (about every 8 s), otherwise the
-    // effect would sit at zero and do nothing.
     let phase = mix(uniforms.time * 0.8, beats * 0.78539816339, uniforms.bpmSync_SWIRL);
     let dims = vec2f(textureDimensions(u_image));
     let aspect = vec2f(dims.x / dims.y, 1.0);
     var p = (uv - vec2f(0.5)) * aspect;
-    // A vortex: strongest at the center and fading to nothing at the corners, measured in
-    // screen-shaped units, so the edges stay put instead of being dragged in and smeared.
     let falloff = 1.0 - smoothstep(0.0, 0.5 * length(aspect), length(p));
     let twist = 2.5 * sin(phase) * falloff * falloff;
     p = vec2f(p.x * cos(twist) - p.y * sin(twist), p.x * sin(twist) + p.y * cos(twist));
@@ -199,12 +189,8 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let pulse = exp(-beatPhase * 6.0) * 0.3 * uniforms.bpmSync_PIXELATE;
     let effectiveIntensity = clamp(uniforms.intensity_PIXELATE + pulse, 0.0, 1.0);
     let dims = vec2f(textureDimensions(u_image));
-    // Exponential so the slider changes the perceived block size evenly, with columns matched
-    // to the screen shape so the blocks stay square.
     let rows = 400.0 * pow(0.025, effectiveIntensity);
     let cells = vec2f(rows * dims.x / dims.y, rows);
-    // Always snapped to cell centers, because blending with the smooth coordinates turns
-    // partial intensity into a mosaic of tiny copies instead of clean pixels.
     uv = (floor(uv * cells) + vec2f(0.5)) / cells;
   `,
 
@@ -217,7 +203,6 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let beatPhase = fract(uniforms.time / beatPeriod);
     let beatPulse = exp(-beatPhase * 7.0) * uniforms.bpmSync_VORONOI;
     let dims = vec2f(textureDimensions(u_image));
-    // Cells laid out in screen-shaped units so they come out round rather than stretched.
     let aspect = vec2f(dims.x / dims.y, 1.0);
     let cellDensity = mix(7.0, 3.0, ei) * (1.0 - beatPulse * 0.30);
     let globalDrift = vec2f(uniforms.time * 0.010, uniforms.time * 0.007);
@@ -242,18 +227,14 @@ const effectWGSL: Record<ShaderEffect, string> = {
     }
     let toCenter = nearest - cellFrac;
     let r = length(toCenter);
-    // Intensity scales the pull (beat included) once, rather than also a final blend, so the
-    // slider responds evenly and zero means off.
     let pull = ei * (0.45 + beatPulse * 0.35) * exp(-r * r * 5.0);
     uv = ((cellIdx + cellFrac + toCenter * pull) / cellDensity - globalDrift) / aspect;
   `,
 
   [ShaderEffect.RIPPLE]: `
     let beatPeriod = 60.0 / uniforms.bpm;
-    // Without BPM sync a ring still spreads every 2 s, otherwise the effect would do nothing.
     let ringPhase = mix(fract(uniforms.time * 0.5), fract(uniforms.time / beatPeriod), uniforms.bpmSync_RIPPLE);
     let dims = vec2f(textureDimensions(u_image));
-    // Measured in screen-shaped units so the rings are circles, not ellipses shaped like the window.
     let aspect = vec2f(dims.x / dims.y, 1.0);
     let p = (uv - vec2f(0.5)) * aspect;
     let distFromCenter = length(p);
@@ -274,7 +255,6 @@ const effectWGSL: Record<ShaderEffect, string> = {
     let cosR = cos(rotationStep);
     let sinR = sin(rotationStep);
     let dims = vec2f(textureDimensions(u_image));
-    // Rotated in screen-shaped units, so the trails turn instead of squashing as they rotate.
     let aspect = vec2f(dims.x / dims.y, 1.0);
     var centered = (uv - vec2f(0.5)) * aspect;
     centered = vec2f(centered.x * cosR - centered.y * sinR, centered.x * sinR + centered.y * cosR);
@@ -286,7 +266,6 @@ const effectWGSL: Record<ShaderEffect, string> = {
   [ShaderEffect.PALETTE_CYCLING]: `
     let luma = dot(color.rgb, vec3f(0.299, 0.587, 0.114));
     let beats = (uniforms.time * uniforms.bpm) / 60.0;
-    // Without BPM sync it still cycles every 10 s, otherwise the palette would stand still.
     let cyclePhase = luma + mix(uniforms.time * 0.1, beats / 4.0, uniforms.bpmSync_PALETTE_CYCLING);
     let palette = vec3f(0.5) + vec3f(0.5) * cos(6.28318530718 * (vec3f(cyclePhase) + vec3f(0.0, 0.333, 0.667)));
     color = vec4f(mix(color.rgb, palette, uniforms.intensity_PALETTE_CYCLING), color.a);
@@ -332,7 +311,6 @@ const effectWGSL: Record<ShaderEffect, string> = {
     color = vec4f(mix(color.rgb, hist.rgb, mix(0.70, 0.94, uniforms.intensity_AURORA)), color.a);
   `,
 
-  // Empty: compute-stage effects render through their own passes.
   [ShaderEffect.REACTION_DIFFUSION]: ''
 };
 
@@ -350,14 +328,17 @@ ${UNIFORMS_STRUCT}
 @group(1) @binding(0) var<uniform> uniforms: Uniforms;
 `;
 
-// Mapping effects only move the sampling coordinate, so all active ones run in a single pass
-// that samples the image once; as separate passes, every bilinear resample softens the picture.
 export const MAPPING_EFFECTS = Object.values(ShaderEffect).filter(
   (effect) => shaderEffects[effect].stage === 'mapping'
 );
 
-// Reversed because, chained as passes, each effect sampled the previous one's output, so the
-// final coordinate is the first effect's transform applied to the second's, and so on.
+export function mappingMask(active: Record<ShaderEffect, boolean>): number {
+  return MAPPING_EFFECTS.reduce(
+    (mask, effect, bit) => (active[effect] ? mask | (1 << bit) : mask),
+    0
+  );
+}
+
 export function createMappingShaderWGSL(): string {
   const blocks = MAPPING_EFFECTS.map((effect, bit) => ({ effect, bit }))
     .reverse()
@@ -397,8 +378,6 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
   `;
 }
 
-// A fragment pass into ping-pong textures instead of a compute pass, which avoids
-// storage-format issues. It reuses feedbackTextureBGL with the video frame in the history slot.
 export const rdStepShader = /* wgsl */ `
 ${UNIFORMS_STRUCT}
 @group(0) @binding(0) var rd_state: texture_2d<f32>;
@@ -433,14 +412,12 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
   let beatPhase = fract(uniforms.time / beatPeriod);
   let pulse = exp(-beatPhase * 6.0) * uniforms.bpmSync_REACTION_DIFFUSION;
 
-  // A time-independent hash, so the background seeds don't shimmer from frame to frame.
   let stableHash = fract(sin(texCoord.x * 13579.1 + texCoord.y * 37211.7) * 43758.5453);
   if (luma > 0.35 && stableHash < intensity * intensity * 0.0015) {
     newB = min(newB + 0.25, 1.0);
     newA = max(newA - 0.15, 0.0);
   }
 
-  // A time-varying hash gated by the beat pulse, so bursts of new seeds land on the beat.
   let burstHash = fract(sin(texCoord.x * 7919.1 + texCoord.y * 4211.7 + uniforms.time * 3.1) * 43758.5453);
   if (luma > 0.30 && burstHash < pulse * 0.06 * intensity) {
     newB = min(newB + 0.5, 1.0);
@@ -451,7 +428,6 @@ fn fs_main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
 }
 `;
 
-// Reuses feedbackTextureBGL with the RD state in the history slot.
 export const rdCompositeShader = /* wgsl */ `
 ${UNIFORMS_STRUCT}
 @group(0) @binding(0) var u_image: texture_2d<f32>;
