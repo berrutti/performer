@@ -24,10 +24,10 @@
     "ci": "yarn check:tauri-versions && yarn lint:ci && yarn format:check && yarn typecheck && yarn test --run"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-store": "^2.4.3",
-    "vue": "^3.5.39"
+    "@tauri-apps/api": "^2.12.1",
+    "@tauri-apps/plugin-dialog": "^2.8.1",
+    "@tauri-apps/plugin-store": "^2.5.0",
+    "vue": "^3.5.43"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
